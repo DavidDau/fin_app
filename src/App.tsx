@@ -63,6 +63,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [onboarding, setOnboarding] = useState<OnboardingData | null>(null)
   const [summary, setSummary] = useState<MonthlySummary | null>(null)
+  const [showBudgetForm, setShowBudgetForm] = useState(false)
   useEffect(() => {
     const accessToken = localStorage.getItem('finapp_access_token')
     if (!accessToken) {
@@ -327,6 +328,28 @@ function App() {
     setContributingGoal(null)
     notify('Savings contribution added')
   }
+  const saveBudget = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    const names = Array.from(data.entries()).filter(([key]) => key.startsWith('allocation-name-'))
+    const allocations = names.map(([key, value]) => {
+      const index = key.replace('allocation-name-', '')
+      return { name: String(value).trim(), amount: Number(data.get(`allocation-amount-${index}`)) || 0 }
+    }).filter(item => item.name)
+    const response = await fetch(`${apiBase}/budget/allocations`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
+      body: JSON.stringify({ month_start: monthStart(month), allocations }),
+    })
+    if (!response.ok) {
+      notify('Unable to save budget allocations')
+      return
+    }
+    setShowBudgetForm(false)
+    notify('Budget allocations saved')
+    const summaryResponse = await fetch(`${apiBase}/reports/monthly-summary?month_start=${monthStart(month)}`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
+    if (summaryResponse.ok) setSummary(await summaryResponse.json() as MonthlySummary)
+  }
 
   if (authLoading) return <div className="auth-shell"><div className="auth-loading">Loading FinApp…</div></div>
   if (!authUser) return <AuthScreen initialError={authError} onAuthenticated={(user, tokens) => {
@@ -367,7 +390,7 @@ function App() {
       <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>{view}</b></div><div className="top-actions"><label className="month-select">◷ <select value={month} onChange={e => setMonth(e.target.value)}><option>September 2026</option><option>August 2026</option><option>July 2026</option></select></label><span className="topbar-app-name">FinApp</span><button className="icon-button">⌕</button><button className="icon-button">♧</button></div></header>
       <div className="content">
         {view === 'Dashboard' && <Dashboard month={month} expenses={expenses} income={income} openingBalance={summary?.opening_balance ?? onboarding.openingBalance} allocations={summary?.allocations ?? []} transactions={transactions} onAdd={openTransactionForm} onNavigate={setView} />}
-        {view === 'Budget' && <Budget allocations={summary?.allocations ?? []} onAdd={() => notify('Budget editing is ready for your next allocation.')} />}
+        {view === 'Budget' && <Budget allocations={summary?.allocations ?? []} onAdd={() => setShowBudgetForm(true)} />}
         {view === 'Transactions' && <Transactions transactions={transactions} onAdd={openTransactionForm} onEdit={editTransaction} onDelete={deleteTransaction} />}
         {view === 'Bills' && <Bills bills={bills} onAdd={() => openBillForm()} onEdit={openBillForm} onDelete={deleteBill} />}
         {view === 'Goals' && <Goals goals={goals} onAdd={() => openGoalForm()} onEdit={openGoalForm} onDelete={deleteGoal} onContribute={setContributingGoal} />}
@@ -379,6 +402,7 @@ function App() {
     {showBillForm && <BillModal bill={editingBill} onClose={() => { setShowBillForm(false); setEditingBill(null) }} onSubmit={saveBill} />}
     {showGoalForm && <GoalModal goal={editingGoal} onClose={() => { setShowGoalForm(false); setEditingGoal(null) }} onSubmit={saveGoal} />}
     {contributingGoal && <ContributionModal goal={contributingGoal} onClose={() => setContributingGoal(null)} onSubmit={addContribution} />}
+    {showBudgetForm && <BudgetModal allocations={summary?.allocations ?? []} onClose={() => setShowBudgetForm(false)} onSubmit={saveBudget} />}
     {toast && <div className="toast">✓ {toast}</div>}
   </div>
 }
@@ -511,6 +535,7 @@ function TransactionList({ transactions, onEdit, onDelete }: { transactions: Tra
 function GoalMini({ title, current, target, color, icon }: { title: string; current: number; target: number; color: string; icon: string }) { return <div className="goal-mini"><div className={`goal-icon ${color}`}>{icon}</div><div className="goal-info"><strong>{title}</strong><span>{money(current)} <small>of {money(target)}</small></span><div className="progress"><span className={color} style={{ width: `${current / target * 100}%` }} /></div></div><b>{Math.round(current / target * 100)}%</b></div> }
 
 function Budget({ allocations, onAdd }: { allocations: { name: string; planned: number; spent: number }[]; onAdd: () => void }) { const plannedTotal = allocations.reduce((total, item) => total + item.planned, 0); const spentTotal = allocations.reduce((total, item) => total + item.spent, 0); const usedTotal = plannedTotal ? spentTotal / plannedTotal * 100 : 0; return <><PageHeading title="Monthly budget" description="Plan ahead and make every franc count." action={<button className="primary" onClick={onAdd}>＋ Edit allocations</button>} /><div className="card allocation-card"><div className="allocation-summary"><div><small>Total planned</small><strong>{money(plannedTotal)}</strong></div><div><small>Total spent</small><strong>{money(spentTotal)}</strong></div><div><small>Remaining</small><strong className="orange-text">{money(Math.max(0, plannedTotal - spentTotal))}</strong></div><div className="allocation-chart"><div className="donut small"><span>{Math.round(usedTotal)}%<small>used</small></span></div></div></div><div className="table-wrap"><table><thead><tr><th>Category</th><th>Planned</th><th>Actual</th><th>Remaining</th><th>Used</th><th>Status</th></tr></thead><tbody>{allocations.map(item => { const used = item.planned ? item.spent / item.planned * 100 : 0; return <tr key={item.name}><td><span className="category-icon">•</span><b>{item.name}</b></td><td>{money(item.planned)}</td><td>{money(item.spent)}</td><td className="orange-text">{money(Math.max(0, item.planned - item.spent))}</td><td><div className="table-progress"><span style={{ width: `${Math.min(100, used)}%` }} /></div><small>{Math.round(used)}%</small></td><td><span className={`status ${used > 70 ? 'warning' : 'good'}`}>{used > 70 ? 'Watch' : 'On track'}</span></td></tr> })}</tbody></table></div></div></> }
+function BudgetModal({ allocations, onClose, onSubmit }: { allocations: { name: string; planned: number; spent: number }[]; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) { const [rows, setRows] = useState(allocations.map(item => ({ name: item.name, amount: item.planned }))); const addRow = () => setRows(current => [...current, { name: '', amount: 0 }]); return <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}><form className="modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">Monthly plan</span><h2>Edit allocations</h2></div><button type="button" className="close" onClick={onClose}>×</button></div><div className="budget-edit-list">{rows.map((row, index) => <div className="form-row budget-edit-row" key={`${row.name}-${index}`}><label>Category<input name={`allocation-name-${index}`} value={row.name} onChange={event => setRows(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} required /></label><label>Planned amount<div className="amount-input"><span>RWF</span><input name={`allocation-amount-${index}`} type="number" min="0" value={row.amount || ''} onChange={event => setRows(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, amount: Number(event.target.value) } : item))} required /></div></label><button type="button" className="transaction-action delete" onClick={() => setRows(current => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div><button type="button" className="secondary full" onClick={addRow}>＋ Add allocation</button><button className="primary full" type="submit">Save allocations</button></form></div> }
 
 function Transactions({ transactions, onAdd, onEdit, onDelete }: { transactions: Transaction[]; onAdd: (type: 'Expense' | 'Income') => void; onEdit: (transaction: Transaction) => void; onDelete: (transaction: Transaction) => void }) { const [query, setQuery] = useState(''); const filtered = transactions.filter(t => t.description.toLowerCase().includes(query.toLowerCase()) || t.category.toLowerCase().includes(query.toLowerCase())); return <><PageHeading title="Transactions" description="A clear history of where your money goes." action={<TransactionActions onAdd={onAdd} />} /><div className="card transactions-card"><div className="filters"><label className="search">⌕ <input placeholder="Search transactions" value={query} onChange={e => setQuery(e.target.value)} /></label><button className="filter-button">All types ▾</button><button className="filter-button">All categories ▾</button><button className="filter-button">September ▾</button></div><TransactionList transactions={filtered} onEdit={onEdit} onDelete={onDelete} /></div></> }
 function Bills({ bills, onAdd, onEdit, onDelete }: { bills: Bill[]; onAdd: () => void; onEdit: (bill: Bill) => void; onDelete: (bill: Bill) => void }) { return <><PageHeading title="Bills" description="Stay ahead of recurring payments and one-time debts." action={<button className="primary" onClick={onAdd}>＋ Add bill</button>} /><div className="bill-grid">{bills.map((bill, index) => <div className="card bill-card" key={bill.id || `${bill.name}-${index}`}><div className="bill-top"><span className="bill-icon">ϟ</span><span className="status neutral">{bill.frequency}</span></div><h2>{bill.name}</h2><p>{bill.frequency === 'Recurring' ? `Due on day ${bill.due_day}` : 'One-time debt'}</p><div className="bill-amount"><span>Amount <b>{money(bill.amount)}</b></span></div><div className="progress"><span style={{ width: '0%' }} /></div><div className="bill-actions"><button className="transaction-action" onClick={() => onEdit(bill)}>Edit</button><button className="transaction-action delete" onClick={() => onDelete(bill)}>Delete</button></div></div>)}</div>{bills.length === 0 && <div className="card empty-state">No bills or debts have been added yet.</div>}</> }

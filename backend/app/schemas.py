@@ -80,6 +80,11 @@ class SetupAllocationResponse(SetupAllocation):
     category_id: UUID
 
 
+class BudgetAllocationUpdate(BaseModel):
+    month_start: date
+    allocations: list[SetupAllocation] = Field(default_factory=list, max_length=50)
+
+
 class SetupBillResponse(SetupBill):
     id: UUID
 

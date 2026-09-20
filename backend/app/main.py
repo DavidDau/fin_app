@@ -8,6 +8,7 @@ from app.transactions import router as transactions_router
 from app.reports import router as reports_router
 from app.bills import router as bills_router
 from app.goals import router as goals_router
+from app.budget import router as budget_router
 
 settings = get_settings()
 
@@ -26,6 +27,7 @@ app.include_router(transactions_router, prefix=settings.api_v1_prefix)
 app.include_router(reports_router, prefix=settings.api_v1_prefix)
 app.include_router(bills_router, prefix=settings.api_v1_prefix)
 app.include_router(goals_router, prefix=settings.api_v1_prefix)
+app.include_router(budget_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/health", tags=["system"])

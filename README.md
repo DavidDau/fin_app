@@ -116,6 +116,12 @@ Goals and savings contributions have authenticated endpoints:
 
 The Goals view displays contribution progress and supports creating, editing, and deleting goals as well as adding dated savings contributions.
 
+Monthly budget allocations can be updated without replacing bills or goals:
+
+- `PUT /api/v1/budget/allocations`
+
+The Budget view allows users to edit existing categories, add new allocation categories, remove categories, and save planned amounts for the selected month.
+
 Monthly reporting is available at:
 
 - `GET /api/v1/reports/monthly-summary?month_start=YYYY-MM-01`
