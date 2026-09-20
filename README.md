@@ -28,13 +28,29 @@ Copy `backend\.env.example` to `backend\.env` before connecting the API to a loc
 
 ### Database
 
+Docker Desktop must be installed and running for the local PostgreSQL service.
+
 Start the local PostgreSQL service with:
 
 ```powershell
 docker compose up -d postgres
 ```
 
-The database migration foundation is in `backend\migrations`. Application tables will be added in the database schema phase.
+The database schema is defined in `backend\app\models.py` and created by the initial migration in `backend\migrations\versions`. To apply migrations:
+
+```powershell
+Push-Location backend
+C:\Python313\python.exe -m alembic upgrade head
+Pop-Location
+```
+
+Run schema tests with:
+
+```powershell
+Push-Location backend
+C:\Python313\python.exe -m unittest discover -s tests
+Pop-Location
+```
 
 ## Current frontend features
 
