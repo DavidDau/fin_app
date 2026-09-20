@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     database_url: str = "postgresql+psycopg://finapp:finapp@localhost:5432/finapp"
     frontend_origin: str = "http://localhost:5173"
+    jwt_secret_key: str = "change-this-development-secret"
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 30
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

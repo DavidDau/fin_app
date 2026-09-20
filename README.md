@@ -2,7 +2,7 @@
 
 FinApp is a responsive personal finance application for planning income, tracking spending, managing bills, and monitoring savings goals.
 
-> **Current status:** The responsive frontend MVP and initial FastAPI backend foundation are implemented. Financial data is still mock/in-memory in the frontend; PostgreSQL persistence, authentication, and the financial API are next.
+> **Current status:** The responsive frontend MVP, PostgreSQL schema, and Phase 4 authentication foundation are implemented. Financial data is still mock/in-memory in the frontend; authenticated financial APIs and frontend API integration are next.
 
 ## Local development
 
@@ -51,6 +51,18 @@ Push-Location backend
 C:\Python313\python.exe -m unittest discover -s tests
 Pop-Location
 ```
+
+### Authentication
+
+The backend now exposes:
+
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me`
+
+Set a strong `JWT_SECRET_KEY` in `backend\.env` before using authentication outside local development. Access tokens are short-lived JWTs; refresh tokens are stored only as SHA-256 hashes and are rotated when refreshed.
 
 ## Current frontend features
 
