@@ -5,7 +5,9 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config import get_settings
 from app.database import Base
-from app import models  # pyright: ignore[reportUnusedImport]
+from app import models as _models
+
+del _models
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url)

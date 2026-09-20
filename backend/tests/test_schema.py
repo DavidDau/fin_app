@@ -5,8 +5,10 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app import models  # pyright: ignore[reportUnusedImport]
+from app import models as _models
 from app.models import Bill, MonthlyPlan
+
+del _models
 
 
 class SchemaTests(unittest.TestCase):
