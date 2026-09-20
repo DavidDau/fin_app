@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +15,15 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 30
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @model_validator(mode="after")
+    def validate_production_settings(self) -> "Settings":
+        if self.app_env.lower() == "production":
+            if self.jwt_secret_key == "change-this-development-secret" or len(self.jwt_secret_key) < 32:
+                raise ValueError("JWT_SECRET_KEY must be a random value of at least 32 characters in production")
+            if "*" in self.frontend_origin or not self.frontend_origin.startswith("https://"):
+                raise ValueError("FRONTEND_ORIGIN must be an explicit HTTPS origin in production")
+        return self
 
 
 @lru_cache

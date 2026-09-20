@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -28,7 +29,7 @@ def _response(bill: Bill) -> BillResponse:
     )
 
 
-def _owned_bill(db: Session, user: User, bill_id: str) -> Bill:
+def _owned_bill(db: Session, user: User, bill_id: UUID) -> Bill:
     bill = db.scalar(
         select(Bill).where(Bill.id == bill_id, Bill.user_id == user.id)
     )
@@ -96,7 +97,7 @@ def create_bill(
 
 @router.put("/{bill_id}", response_model=BillResponse)
 def update_bill(
-    bill_id: str,
+    bill_id: UUID,
     payload: BillUpdate,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
@@ -114,7 +115,7 @@ def update_bill(
 
 @router.delete("/{bill_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_bill(
-    bill_id: str,
+    bill_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> None:

@@ -1,6 +1,7 @@
 from calendar import monthrange
 from datetime import date, datetime, timezone
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -93,7 +94,7 @@ def create_transaction(
     return _response(transaction, category)
 
 
-def _owned_transaction(db: Session, user: User, transaction_id: str) -> tuple[Transaction, Category]:
+def _owned_transaction(db: Session, user: User, transaction_id: UUID) -> tuple[Transaction, Category]:
     transaction, category = db.execute(
         select(Transaction, Category)
         .join(Category, Transaction.category_id == Category.id)
@@ -106,7 +107,7 @@ def _owned_transaction(db: Session, user: User, transaction_id: str) -> tuple[Tr
 
 @router.put("/{transaction_id}", response_model=TransactionResponse)
 def update_transaction(
-    transaction_id: str,
+    transaction_id: UUID,
     payload: TransactionUpdate,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
@@ -145,7 +146,7 @@ def update_transaction(
 
 @router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_transaction(
-    transaction_id: str,
+    transaction_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> None:

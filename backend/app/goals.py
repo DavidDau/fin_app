@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -43,7 +44,7 @@ def _response(db: Session, goal: Goal) -> GoalResponse:
     )
 
 
-def _owned_goal(db: Session, user: User, goal_id: str) -> Goal:
+def _owned_goal(db: Session, user: User, goal_id: UUID) -> Goal:
     goal = db.scalar(select(Goal).where(Goal.id == goal_id, Goal.user_id == user.id))
     if goal is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Goal not found")
@@ -86,7 +87,7 @@ def create_goal(
 
 @router.put("/{goal_id}", response_model=GoalResponse)
 def update_goal(
-    goal_id: str,
+    goal_id: UUID,
     payload: GoalUpdate,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
@@ -103,18 +104,19 @@ def update_goal(
 
 @router.delete("/{goal_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_goal(
-    goal_id: str,
+    goal_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> None:
     goal = _owned_goal(db, current_user, goal_id)
+    db.execute(delete(GoalContribution).where(GoalContribution.goal_id == goal.id))
     db.delete(goal)
     db.commit()
 
 
 @router.post("/{goal_id}/contributions", response_model=ContributionResponse, status_code=status.HTTP_201_CREATED)
 def add_contribution(
-    goal_id: str,
+    goal_id: UUID,
     payload: ContributionCreate,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],

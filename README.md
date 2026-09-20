@@ -2,7 +2,7 @@
 
 FinApp is a responsive personal finance application for planning income, tracking spending, managing bills, and monitoring savings goals.
 
-> **Current status:** The responsive frontend MVP, PostgreSQL schema, Phase 4 authentication foundation, frontend login/register flow, and first-use onboarding are implemented. Financial data is still local to the signed-in browser; authenticated financial APIs are next.
+> **Current status:** The responsive frontend, authenticated PostgreSQL-backed financial workflows, CRUD operations, savings contributions, budget editing, token refresh, and deployment container setup are implemented. Production hosting, DNS, TLS termination, backups, and monitoring still need to be configured for the chosen provider.
 
 ## Local development
 
@@ -71,6 +71,26 @@ VITE_API_URL=http://127.0.0.1:8000
 ```
 
 Start the backend before opening the frontend. The first screen allows a user to register or sign in, restores an existing session, and provides sign out from the workspace profile.
+
+## Production deployment
+
+The repository includes:
+
+- `backend\Dockerfile` for the API and automatic Alembic migrations at container startup.
+- `Dockerfile` and `nginx.conf` for the Vite build served as a single-page application.
+- `docker-compose.prod.yml` for PostgreSQL, API, and frontend containers.
+- `.env.production.example` documenting required production variables.
+
+To deploy on a Docker host:
+
+1. Copy `.env.production.example` to `.env` and replace every placeholder with a strong secret or your real HTTPS origins.
+2. Set `VITE_API_URL` to the public API origin without `/api/v1`; the frontend appends that path.
+3. Put a TLS reverse proxy or managed HTTPS load balancer in front of the frontend and API, then set `FRONTEND_ORIGIN` to the exact frontend origin.
+4. Run `docker compose --env-file .env -f docker-compose.prod.yml up -d --build`.
+5. Verify `/health` and `/api/v1/health`, then confirm `alembic upgrade head` completed in the API logs.
+6. Configure encrypted PostgreSQL backups, log retention, alerting, and a restore drill before accepting production users.
+
+Do not commit `.env`, production passwords, or JWT secrets. The production settings reject the development JWT secret and non-production frontend origins when `APP_ENV=production`.
 
 After the first sign-in, FinApp guides each user through a four-step setup:
 
