@@ -95,6 +95,12 @@ Authenticated transaction endpoints are also available:
 
 Income and Expense entries from the frontend are now stored against the signed-in user in PostgreSQL and loaded back into the dashboard and Transactions view.
 
+Monthly reporting is available at:
+
+- `GET /api/v1/reports/monthly-summary?month_start=YYYY-MM-01`
+
+The dashboard uses this summary to calculate opening balance, planned and actual income, expenses, available balance, and allocation spending for the selected month. Month-filtered transaction loading uses the complete calendar month range.
+
 ## Current frontend features
 
 - FinApp coin-style branding.

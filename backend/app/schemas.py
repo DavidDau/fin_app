@@ -114,3 +114,20 @@ class TransactionResponse(BaseModel):
     category: str
     description: str
     need_want: Literal["NEED", "WANT"] | None
+
+
+class MonthlyAllocationSummary(BaseModel):
+    name: str
+    planned: Decimal
+    spent: Decimal
+
+
+class MonthlySummaryResponse(BaseModel):
+    month_start: date
+    opening_balance: Decimal
+    planned_income: Decimal
+    actual_income: Decimal
+    total_income: Decimal
+    total_expenses: Decimal
+    available_balance: Decimal
+    allocations: list[MonthlyAllocationSummary]

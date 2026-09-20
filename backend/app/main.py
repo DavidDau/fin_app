@@ -5,6 +5,7 @@ from app.config import get_settings
 from app.auth import router as auth_router
 from app.setup import router as setup_router
 from app.transactions import router as transactions_router
+from app.reports import router as reports_router
 
 settings = get_settings()
 
@@ -20,6 +21,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(setup_router, prefix=settings.api_v1_prefix)
 app.include_router(transactions_router, prefix=settings.api_v1_prefix)
+app.include_router(reports_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/health", tags=["system"])

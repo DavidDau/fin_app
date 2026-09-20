@@ -6,6 +6,7 @@ type AuthMode = 'login' | 'register'
 type AuthUser = { id: string; email: string; display_name: string | null; is_active: boolean }
 type AuthTokens = { access_token: string; refresh_token: string; token_type: string }
 type TransactionResponse = { id: string; transaction_date: string; transaction_type: 'INCOME' | 'EXPENSE'; amount: number; category: string; description: string; need_want: 'NEED' | 'WANT' | null }
+type MonthlySummary = { month_start: string; opening_balance: number; planned_income: number; actual_income: number; total_income: number; total_expenses: number; available_balance: number; allocations: { name: string; planned: number; spent: number }[] }
 type OnboardingData = {
   openingBalance: number
   monthlyIncome: number
@@ -33,6 +34,10 @@ const budgetRows = [
   ['Entertainment', 45000, 9500, '🎧'], ['Savings', 100000, 50000, '🌱'],
 ]
 const emptyOnboarding: OnboardingData = { openingBalance: 0, monthlyIncome: 0, allocations: [], bills: [], goals: [] }
+const monthStart = (value: string) => {
+  const date = new Date(`${value} 1`)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`
+}
 
 function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
@@ -47,6 +52,7 @@ function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [onboarding, setOnboarding] = useState<OnboardingData | null>(null)
+  const [summary, setSummary] = useState<MonthlySummary | null>(null)
   useEffect(() => {
     const accessToken = localStorage.getItem('finapp_access_token')
     if (!accessToken) {
@@ -93,7 +99,8 @@ function App() {
   }, [authUser])
   useEffect(() => {
     if (!authUser) return
-    fetch(`${apiBase}/transactions`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
+    const selectedMonth = monthStart(month)
+    fetch(`${apiBase}/transactions?month_start=${selectedMonth}`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
       .then(async response => {
         if (!response.ok) throw new Error('Unable to load transactions.')
         return response.json() as Promise<TransactionResponse[]>
@@ -108,9 +115,19 @@ function App() {
         need: item.need_want === 'WANT' ? 'Want' : 'Need',
       }))))
       .catch(() => setTransactions([]))
-  }, [authUser])
-  const expenses = transactions.filter(t => t.type === 'Expense').reduce((s, t) => s + t.amount, 0)
-  const income = transactions.filter(t => t.type === 'Income').reduce((s, t) => s + t.amount, 0) + (onboarding?.monthlyIncome || 0)
+  }, [authUser, month])
+  useEffect(() => {
+    if (!authUser || !onboarding) return
+    fetch(`${apiBase}/reports/monthly-summary?month_start=${monthStart(month)}`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
+      .then(async response => {
+        if (!response.ok) throw new Error('Unable to load monthly summary.')
+        return response.json() as Promise<MonthlySummary>
+      })
+      .then(setSummary)
+      .catch(() => setSummary(null))
+  }, [authUser, onboarding, month])
+  const expenses = summary?.total_expenses ?? transactions.filter(t => t.type === 'Expense').reduce((s, t) => s + t.amount, 0)
+  const income = summary?.total_income ?? transactions.filter(t => t.type === 'Income').reduce((s, t) => s + t.amount, 0) + (onboarding?.monthlyIncome || 0)
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2600) }
   const openTransactionForm = (type: 'Expense' | 'Income') => {
     setTransactionType(type)
@@ -186,7 +203,7 @@ function App() {
     <main className="main">
       <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>{view}</b></div><div className="top-actions"><label className="month-select">◷ <select value={month} onChange={e => setMonth(e.target.value)}><option>September 2026</option><option>August 2026</option><option>July 2026</option></select></label><span className="topbar-app-name">FinApp</span><button className="icon-button">⌕</button><button className="icon-button">♧</button></div></header>
       <div className="content">
-        {view === 'Dashboard' && <Dashboard month={month} expenses={expenses} income={income} openingBalance={onboarding.openingBalance} transactions={transactions} onAdd={openTransactionForm} onNavigate={setView} />}
+        {view === 'Dashboard' && <Dashboard month={month} expenses={expenses} income={income} openingBalance={summary?.opening_balance ?? onboarding.openingBalance} allocations={summary?.allocations ?? []} transactions={transactions} onAdd={openTransactionForm} onNavigate={setView} />}
         {view === 'Budget' && <Budget onAdd={() => notify('Budget editing is ready for your next allocation.')} />}
         {view === 'Transactions' && <Transactions transactions={transactions} onAdd={openTransactionForm} />}
         {view === 'Bills' && <Bills onAdd={() => notify('Bill form will be connected to your recurring bills.')} />}
@@ -312,11 +329,13 @@ function PageHeading({ eyebrow, title, description, action }: { eyebrow?: string
 function TransactionActions({ onAdd }: { onAdd: (type: 'Expense' | 'Income') => void }) {
   return <div className="transaction-actions"><button className="income-action" onClick={() => onAdd('Income')}>＋ Income</button><button className="expense-action" onClick={() => onAdd('Expense')}>− Expense</button></div>
 }
-function Dashboard({ month, expenses, income, openingBalance, transactions, onAdd, onNavigate }: { month: string; expenses: number; income: number; openingBalance: number; transactions: Transaction[]; onAdd: (type: 'Expense' | 'Income') => void; onNavigate: (v: View) => void }) {
+function Dashboard({ month, expenses, income, openingBalance, allocations, transactions, onAdd, onNavigate }: { month: string; expenses: number; income: number; openingBalance: number; allocations: { name: string; planned: number; spent: number }[]; transactions: Transaction[]; onAdd: (type: 'Expense' | 'Income') => void; onNavigate: (v: View) => void }) {
   const balance = openingBalance + income - expenses
+  const planned = allocations.reduce((total, item) => total + item.planned, 0)
+  const usedPercent = planned > 0 ? Math.min(100, Math.round(expenses / planned * 100)) : 0
   return <><PageHeading eyebrow={month} title="Good morning, Alex" description="Here's your financial snapshot for this month." action={<TransactionActions onAdd={onAdd} />} />
     <section className="kpi-grid"><Kpi label="Available balance" value={money(balance)} change="+8.4%" tone="orange" icon="◉" /><Kpi label="Income" value={money(income)} change="+12.6%" tone="green" icon="↗" /><Kpi label="Expenses" value={money(expenses)} change="-4.2%" tone="blue" icon="↘" /><Kpi label="Savings" value={money(150000)} change="On track" tone="purple" icon="♡" /></section>
-    <div className="dashboard-grid"><section className="card budget-card"><div className="section-title"><div><h2>Budget overview</h2><p>How you're tracking this month</p></div><button className="text-button" onClick={() => onNavigate('Budget')}>View budget →</button></div><div className="budget-total"><div><small>Spent so far</small><strong>{money(expenses)}</strong><span>of {money(505000)} planned</span></div><div className="donut"><span>47%<small>used</small></span></div></div><div className="progress wide"><span style={{ width: '47%' }} /></div><div className="legend"><span><i className="dot orange" />Spent <b>{money(expenses)}</b></span><span><i className="dot muted" />Remaining <b>{money(273500)}</b></span></div></section>
+    <div className="dashboard-grid"><section className="card budget-card"><div className="section-title"><div><h2>Budget overview</h2><p>How you're tracking this month</p></div><button className="text-button" onClick={() => onNavigate('Budget')}>View budget →</button></div><div className="budget-total"><div><small>Spent so far</small><strong>{money(expenses)}</strong><span>of {money(planned)} planned</span></div><div className="donut"><span>{usedPercent}%<small>used</small></span></div></div><div className="progress wide"><span style={{ width: `${usedPercent}%` }} /></div><div className="legend"><span><i className="dot orange" />Spent <b>{money(expenses)}</b></span><span><i className="dot muted" />Remaining <b>{money(Math.max(0, planned - expenses))}</b></span></div></section>
       <section className="card spending-card"><div className="section-title"><div><h2>Spending activity</h2><p>Daily outflow over the last 7 days</p></div><span className="pill">This month ▾</span></div><div className="chart"><div className="y-labels"><span>80k</span><span>40k</span><span>0</span></div><div className="bars">{[35, 50, 28, 62, 43, 76, 52].map((height, i) => <div className="bar-col" key={i}><span className="bar" style={{ height: `${height}%` }} /><small>{['12', '13', '14', '15', '16', '17', '18'][i]}</small></div>)}</div></div></section></div>
     <div className="lower-grid"><section className="card"><div className="section-title"><div><h2>Recent transactions</h2><p>Your latest money moves</p></div><button className="text-button" onClick={() => onNavigate('Transactions')}>View all →</button></div><TransactionList transactions={transactions.slice(0, 4)} /></section><section className="card goals-card"><div className="section-title"><div><h2>Savings goals</h2><p>Keep your momentum going</p></div><button className="text-button" onClick={() => onNavigate('Goals')}>View goals →</button></div><GoalMini title="Emergency fund" current={300000} target={1000000} color="orange" icon="✦" /><GoalMini title="New laptop" current={420000} target={800000} color="purple" icon="▣" /></section></div>
   </>

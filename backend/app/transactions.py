@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import date, datetime, timezone
 from typing import Annotated
 
@@ -45,7 +46,8 @@ def list_transactions(
         .order_by(Transaction.transaction_date.desc(), Transaction.created_at.desc())
     )
     if month_start:
-        statement = statement.where(Transaction.transaction_date >= month_start)
+        month_end = month_start.replace(day=monthrange(month_start.year, month_start.month)[1])
+        statement = statement.where(Transaction.transaction_date.between(month_start, month_end))
     return [_response(transaction, category) for transaction, category in db.execute(statement).all()]
 
 
