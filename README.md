@@ -1,8 +1,64 @@
-# Personal Budget & Expense Tracker
+# FinApp
 
-A responsive personal finance web application that helps users plan their income, track expenses, manage bills and savings, and understand how much money they have left.
+FinApp is a responsive personal finance application for planning income, tracking spending, managing bills, and monitoring savings goals.
 
-The application is designed to work smoothly on both desktop and mobile screens while keeping the first version simple enough to build, deploy, and maintain.
+> **Current status:** The responsive frontend MVP and initial FastAPI backend foundation are implemented. Financial data is still mock/in-memory in the frontend; PostgreSQL persistence, authentication, and the financial API are next.
+
+## Local development
+
+### Frontend
+
+```powershell
+npm install
+npm run dev
+```
+
+### Backend
+
+From the repository root, install the pinned Python dependencies and start the API:
+
+```powershell
+C:\Python313\python.exe -m pip install -r backend\requirements.txt
+Push-Location backend
+C:\Python313\python.exe -m uvicorn app.main:app --reload
+Pop-Location
+```
+
+Copy `backend\.env.example` to `backend\.env` before connecting the API to a local PostgreSQL instance. The initial health endpoint is available at `http://127.0.0.1:8000/api/v1/health`.
+
+### Database
+
+Start the local PostgreSQL service with:
+
+```powershell
+docker compose up -d postgres
+```
+
+The database migration foundation is in `backend\migrations`. Application tables will be added in the database schema phase.
+
+## Current frontend features
+
+- FinApp coin-style branding.
+- Dashboard with balance, income, expenses, savings, budget, goals, and recent transactions.
+- In-memory transaction creation with immediate dashboard updates.
+- Budget, transactions, bills, goals, reports, and settings views.
+- Month selector and light/dark theme controls.
+- Collapsible desktop sidebar.
+- Floating icon-only bottom navigation on mobile.
+- Responsive layouts for mobile, tablet, and desktop resolutions.
+
+## Project structure
+
+```text
+fin_app/
+├── backend/          FastAPI service, SQLAlchemy, Alembic, and configuration
+├── src/              React + TypeScript frontend
+├── App_Documents/    Product, technical, UX, flow, and schema documentation
+├── docker-compose.yml
+└── package.json
+```
+
+The application is designed to work smoothly on desktop, tablet, and mobile screens while keeping the first version simple enough to build, deploy, and maintain.
 
 ---
 

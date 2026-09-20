@@ -1,1 +1,10 @@
 App_Documents/
+node_modules/
+dist/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+backend/.env
+backend/.venv/
+__pycache__/
+*.py[cod]
