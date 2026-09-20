@@ -18,6 +18,42 @@ type OnboardingData = {
 }
 
 const apiBase = `${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/api/v1`
+let refreshRequest: Promise<boolean> | null = null
+
+const refreshAccessToken = async (): Promise<boolean> => {
+  const refreshToken = localStorage.getItem('finapp_refresh_token')
+  if (!refreshToken) return false
+  if (!refreshRequest) {
+    refreshRequest = fetch(`${apiBase}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    }).then(async response => {
+      if (!response.ok) return false
+      const tokens = await response.json() as AuthTokens
+      localStorage.setItem('finapp_access_token', tokens.access_token)
+      localStorage.setItem('finapp_refresh_token', tokens.refresh_token)
+      return true
+    }).catch(() => false).finally(() => {
+      refreshRequest = null
+    })
+  }
+  return refreshRequest
+}
+
+const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
+  const headers = new Headers(init.headers)
+  const accessToken = localStorage.getItem('finapp_access_token')
+  if (accessToken && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${accessToken}`)
+  const response = await fetch(input, { ...init, headers })
+  const isAuthBootstrapRequest = String(input).endsWith('/auth/login') || String(input).endsWith('/auth/register') || String(input).endsWith('/auth/refresh') || String(input).endsWith('/auth/logout')
+  if (response.status !== 401 || isAuthBootstrapRequest) return response
+  if (!await refreshAccessToken()) return response
+  const retryHeaders = new Headers(init.headers)
+  const refreshedToken = localStorage.getItem('finapp_access_token')
+  if (refreshedToken) retryHeaders.set('Authorization', `Bearer ${refreshedToken}`)
+  return fetch(input, { ...init, headers: retryHeaders })
+}
 
 const nav: { name: View; icon: string }[] = [
   { name: 'Dashboard', icon: '⌂' }, { name: 'Budget', icon: '▥' }, { name: 'Transactions', icon: '↕' },
@@ -70,7 +106,7 @@ function App() {
       setAuthLoading(false)
       return
     }
-    fetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${accessToken}` } })
+    apiFetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${accessToken}` } })
       .then(async response => {
         if (!response.ok) throw new Error('Your session has expired. Please sign in again.')
         return response.json() as Promise<AuthUser>
@@ -86,7 +122,7 @@ function App() {
   useEffect(() => {
     if (authUser) {
       const accessToken = localStorage.getItem('finapp_access_token')
-      fetch(`${apiBase}/setup`, { headers: { Authorization: `Bearer ${accessToken}` } })
+      apiFetch(`${apiBase}/setup`, { headers: { Authorization: `Bearer ${accessToken}` } })
         .then(async response => {
           if (!response.ok) throw new Error('Unable to load your financial setup.')
           return response.json()
@@ -110,7 +146,7 @@ function App() {
   }, [authUser])
   useEffect(() => {
     if (!authUser) return
-    fetch(`${apiBase}/bills`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
+    apiFetch(`${apiBase}/bills`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
       .then(async response => {
         if (!response.ok) throw new Error('Unable to load bills.')
         return response.json() as Promise<Bill[]>
@@ -120,7 +156,7 @@ function App() {
   }, [authUser])
   useEffect(() => {
     if (!authUser) return
-    fetch(`${apiBase}/goals`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
+    apiFetch(`${apiBase}/goals`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
       .then(async response => {
         if (!response.ok) throw new Error('Unable to load goals.')
         return response.json() as Promise<Goal[]>
@@ -131,7 +167,7 @@ function App() {
   useEffect(() => {
     if (!authUser) return
     const selectedMonth = monthStart(month)
-    fetch(`${apiBase}/transactions?month_start=${selectedMonth}`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
+    apiFetch(`${apiBase}/transactions?month_start=${selectedMonth}`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
       .then(async response => {
         if (!response.ok) throw new Error('Unable to load transactions.')
         return response.json() as Promise<TransactionResponse[]>
@@ -150,7 +186,7 @@ function App() {
   }, [authUser, month])
   useEffect(() => {
     if (!authUser || !onboarding) return
-    fetch(`${apiBase}/reports/monthly-summary?month_start=${monthStart(month)}`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
+    apiFetch(`${apiBase}/reports/monthly-summary?month_start=${monthStart(month)}`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
       .then(async response => {
         if (!response.ok) throw new Error('Unable to load monthly summary.')
         return response.json() as Promise<MonthlySummary>
@@ -173,7 +209,7 @@ function App() {
   }
   const deleteTransaction = async (transaction: Transaction) => {
     if (!window.confirm('Delete this transaction?')) return
-    const response = await fetch(`${apiBase}/transactions/${transaction.id}`, {
+    const response = await apiFetch(`${apiBase}/transactions/${transaction.id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
     })
@@ -189,7 +225,7 @@ function App() {
     const data = new FormData(event.currentTarget)
     const amount = Number(data.get('amount'))
     if (!amount || amount < 1) return
-    const response = await fetch(`${apiBase}/transactions${editingTransaction ? `/${editingTransaction.id}` : ''}`, {
+    const response = await apiFetch(`${apiBase}/transactions${editingTransaction ? `/${editingTransaction.id}` : ''}`, {
       method: editingTransaction ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
       body: JSON.stringify({
@@ -238,7 +274,7 @@ function App() {
       due_day: Number(data.get('due_day')) || 1,
     }
     if (!payload.name || !payload.amount || payload.amount < 1) return
-    const response = await fetch(`${apiBase}/bills${editingBill?.id ? `/${editingBill.id}` : ''}`, {
+    const response = await apiFetch(`${apiBase}/bills${editingBill?.id ? `/${editingBill.id}` : ''}`, {
       method: editingBill ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
       body: JSON.stringify(payload),
@@ -256,7 +292,7 @@ function App() {
   }
   const deleteBill = async (bill: Bill) => {
     if (!window.confirm(`Delete ${bill.name}?`) || !bill.id) return
-    const response = await fetch(`${apiBase}/bills/${bill.id}`, {
+    const response = await apiFetch(`${apiBase}/bills/${bill.id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
     })
@@ -266,6 +302,19 @@ function App() {
     }
     setBills(current => current.filter(item => item.id !== bill.id))
     notify('Bill deleted')
+  }
+  const signOut = async () => {
+    const refreshToken = localStorage.getItem('finapp_refresh_token')
+    if (refreshToken) {
+      await fetch(`${apiBase}/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      })
+    }
+    localStorage.removeItem('finapp_access_token')
+    localStorage.removeItem('finapp_refresh_token')
+    setAuthUser(null)
   }
   const openGoalForm = (goal: Goal | null = null) => {
     setEditingGoal(goal)
@@ -280,7 +329,7 @@ function App() {
       monthly: Number(data.get('monthly')) || 0,
     }
     if (!payload.name || payload.target < 1) return
-    const response = await fetch(`${apiBase}/goals${editingGoal?.id ? `/${editingGoal.id}` : ''}`, {
+    const response = await apiFetch(`${apiBase}/goals${editingGoal?.id ? `/${editingGoal.id}` : ''}`, {
       method: editingGoal?.id ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
       body: JSON.stringify(payload),
@@ -298,7 +347,7 @@ function App() {
   }
   const deleteGoal = async (goal: Goal) => {
     if (!goal.id || !window.confirm(`Delete ${goal.name}?`)) return
-    const response = await fetch(`${apiBase}/goals/${goal.id}`, {
+    const response = await apiFetch(`${apiBase}/goals/${goal.id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
     })
@@ -315,7 +364,7 @@ function App() {
     const data = new FormData(event.currentTarget)
     const amount = Number(data.get('amount'))
     if (amount < 1) return
-    const response = await fetch(`${apiBase}/goals/${contributingGoal.id}/contributions`, {
+    const response = await apiFetch(`${apiBase}/goals/${contributingGoal.id}/contributions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
       body: JSON.stringify({ amount, contribution_date: data.get('date') }),
@@ -336,7 +385,7 @@ function App() {
       const index = key.replace('allocation-name-', '')
       return { name: String(value).trim(), amount: Number(data.get(`allocation-amount-${index}`)) || 0 }
     }).filter(item => item.name)
-    const response = await fetch(`${apiBase}/budget/allocations`, {
+    const response = await apiFetch(`${apiBase}/budget/allocations`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
       body: JSON.stringify({ month_start: monthStart(month), allocations }),
@@ -347,7 +396,7 @@ function App() {
     }
     setShowBudgetForm(false)
     notify('Budget allocations saved')
-    const summaryResponse = await fetch(`${apiBase}/reports/monthly-summary?month_start=${monthStart(month)}`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
+    const summaryResponse = await apiFetch(`${apiBase}/reports/monthly-summary?month_start=${monthStart(month)}`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
     if (summaryResponse.ok) setSummary(await summaryResponse.json() as MonthlySummary)
   }
 
@@ -359,7 +408,7 @@ function App() {
     setAuthError('')
   }} /> 
   if (!onboarding) return <OnboardingScreen user={authUser} onComplete={async data => {
-    const response = await fetch(`${apiBase}/setup`, {
+    const response = await apiFetch(`${apiBase}/setup`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
       body: JSON.stringify({
@@ -382,7 +431,7 @@ function App() {
   return <div className={`${theme === 'dark' ? 'app dark' : 'app'} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark" aria-hidden="true"><span>F</span></span><span className="brand-name">Fin<b>App</b></span><button className="sidebar-toggle" aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? '»' : '«'}</button></div>
-      <div className="profile"><div className="avatar">{(authUser.display_name || authUser.email).slice(0, 2).toUpperCase()}</div><div><strong>{authUser.display_name || authUser.email}</strong><small>Personal workspace</small></div><button className="dots" aria-label="Sign out" onClick={() => { localStorage.removeItem('finapp_access_token'); localStorage.removeItem('finapp_refresh_token'); setAuthUser(null) }}>↪</button></div>
+      <div className="profile"><div className="avatar">{(authUser.display_name || authUser.email).slice(0, 2).toUpperCase()}</div><div><strong>{authUser.display_name || authUser.email}</strong><small>Personal workspace</small></div><button className="dots" aria-label="Sign out" onClick={signOut}>↪</button></div>
       <nav>{nav.map(item => <button className={view === item.name ? 'nav-item active' : 'nav-item'} onClick={() => setView(item.name)} key={item.name}><span>{item.icon}</span><b>{item.name}</b></button>)}</nav>
       <div className="sidebar-bottom"><div className="tip"><span>✧</span><div><b>Small steps add up</b><small>You're 24% closer to your savings goal.</small></div></div><button className="upgrade">✦ Upgrade plan <span>→</span></button></div>
     </aside>

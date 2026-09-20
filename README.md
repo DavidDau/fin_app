@@ -122,6 +122,8 @@ Monthly budget allocations can be updated without replacing bills or goals:
 
 The Budget view allows users to edit existing categories, add new allocation categories, remove categories, and save planned amounts for the selected month.
 
+The frontend automatically refreshes expired access tokens once through the rotating refresh-token endpoint, retries the failed request, and revokes the refresh token when the user signs out.
+
 Monthly reporting is available at:
 
 - `GET /api/v1/reports/monthly-summary?month_start=YYYY-MM-01`
