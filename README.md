@@ -106,6 +106,16 @@ Bills have independent authenticated CRUD endpoints:
 
 The Bills view supports adding, editing, and deleting recurring payments and one-time debts. Bill records are scoped to the signed-in user and include an amount, frequency, and due day.
 
+Goals and savings contributions have authenticated endpoints:
+
+- `GET /api/v1/goals`
+- `POST /api/v1/goals`
+- `PUT /api/v1/goals/{goal_id}`
+- `DELETE /api/v1/goals/{goal_id}`
+- `POST /api/v1/goals/{goal_id}/contributions`
+
+The Goals view displays contribution progress and supports creating, editing, and deleting goals as well as adding dated savings contributions.
+
 Monthly reporting is available at:
 
 - `GET /api/v1/reports/monthly-summary?month_start=YYYY-MM-01`

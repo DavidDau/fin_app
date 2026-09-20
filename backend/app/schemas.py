@@ -103,6 +103,33 @@ class SetupGoalResponse(SetupGoal):
     id: UUID
 
 
+class GoalCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    target: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    monthly: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+
+
+class GoalResponse(GoalCreate):
+    id: UUID
+    current: Decimal
+    status: str
+
+
+class GoalUpdate(GoalCreate):
+    pass
+
+
+class ContributionCreate(BaseModel):
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    contribution_date: date
+
+
+class ContributionResponse(BaseModel):
+    id: UUID
+    amount: Decimal
+    contribution_date: date
+
+
 class SetupResponse(BaseModel):
     month_start: date
     opening_balance: Decimal

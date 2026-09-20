@@ -3,6 +3,7 @@ import { FormEvent, ReactNode, useEffect, useState } from 'react'
 type View = 'Dashboard' | 'Budget' | 'Transactions' | 'Bills' | 'Goals' | 'Reports' | 'Settings'
 type Transaction = { id: number | string; date: string; transactionDate?: string; description: string; category: string; amount: number; type: 'Expense' | 'Income'; need: 'Need' | 'Want' }
 type Bill = { id?: string; name: string; amount: number; frequency: 'One-time' | 'Recurring'; due_day?: number }
+type Goal = { id?: string; name: string; target: number; monthly: number; current?: number; status?: string }
 type AuthMode = 'login' | 'register'
 type AuthUser = { id: string; email: string; display_name: string | null; is_active: boolean }
 type AuthTokens = { access_token: string; refresh_token: string; token_type: string }
@@ -13,7 +14,7 @@ type OnboardingData = {
   monthlyIncome: number
   allocations: { name: string; amount: number }[]
   bills: Bill[]
-  goals: { name: string; target: number; monthly: number }[]
+  goals: Goal[]
 }
 
 const apiBase = `${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/api/v1`
@@ -50,6 +51,10 @@ function App() {
   const [bills, setBills] = useState<Bill[]>([])
   const [showBillForm, setShowBillForm] = useState(false)
   const [editingBill, setEditingBill] = useState<Bill | null>(null)
+  const [goals, setGoals] = useState<Goal[]>([])
+  const [showGoalForm, setShowGoalForm] = useState(false)
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null)
+  const [contributingGoal, setContributingGoal] = useState<Goal | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
   const [transactionType, setTransactionType] = useState<'Expense' | 'Income'>('Expense')
@@ -85,14 +90,14 @@ function App() {
           if (!response.ok) throw new Error('Unable to load your financial setup.')
           return response.json()
         })
-        .then((saved: { month_start: string; opening_balance: number; monthly_income: number; allocations: { name: string; amount: number }[]; bills: Bill[]; goals: { name: string; target: number; monthly: number }[] } | null) => {
+        .then((saved: { month_start: string; opening_balance: number; monthly_income: number; allocations: { name: string; amount: number }[]; bills: Bill[]; goals: Goal[] } | null) => {
           if (saved) {
             setOnboarding({
               openingBalance: saved.opening_balance,
               monthlyIncome: saved.monthly_income,
               allocations: saved.allocations.map(item => ({ name: item.name, amount: Number(item.amount) })),
               bills: saved.bills.map(item => ({ id: item.id, name: item.name, amount: Number(item.amount), frequency: item.frequency, due_day: 1 })),
-              goals: saved.goals.map(item => ({ name: item.name, target: Number(item.target), monthly: Number(item.monthly) })),
+              goals: saved.goals.map(item => ({ id: item.id, name: item.name, target: Number(item.target), monthly: Number(item.monthly) })),
             })
           }
         })
@@ -111,6 +116,16 @@ function App() {
       })
       .then(items => setBills(items.map(item => ({ ...item, amount: Number(item.amount) }))))
       .catch(() => setBills([]))
+  }, [authUser])
+  useEffect(() => {
+    if (!authUser) return
+    fetch(`${apiBase}/goals`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
+      .then(async response => {
+        if (!response.ok) throw new Error('Unable to load goals.')
+        return response.json() as Promise<Goal[]>
+      })
+      .then(items => setGoals(items.map(item => ({ ...item, target: Number(item.target), monthly: Number(item.monthly), current: Number(item.current) }))))
+      .catch(() => setGoals([]))
   }, [authUser])
   useEffect(() => {
     if (!authUser) return
@@ -251,6 +266,67 @@ function App() {
     setBills(current => current.filter(item => item.id !== bill.id))
     notify('Bill deleted')
   }
+  const openGoalForm = (goal: Goal | null = null) => {
+    setEditingGoal(goal)
+    setShowGoalForm(true)
+  }
+  const saveGoal = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    const payload = {
+      name: String(data.get('name') || '').trim(),
+      target: Number(data.get('target')),
+      monthly: Number(data.get('monthly')) || 0,
+    }
+    if (!payload.name || payload.target < 1) return
+    const response = await fetch(`${apiBase}/goals${editingGoal?.id ? `/${editingGoal.id}` : ''}`, {
+      method: editingGoal?.id ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+      notify('Unable to save goal')
+      return
+    }
+    const saved = await response.json() as Goal
+    const normalized = { ...saved, target: Number(saved.target), monthly: Number(saved.monthly), current: Number(saved.current) }
+    setGoals(current => editingGoal?.id ? current.map(item => item.id === editingGoal.id ? normalized : item) : [...current, normalized])
+    setShowGoalForm(false)
+    setEditingGoal(null)
+    notify('Goal saved successfully')
+  }
+  const deleteGoal = async (goal: Goal) => {
+    if (!goal.id || !window.confirm(`Delete ${goal.name}?`)) return
+    const response = await fetch(`${apiBase}/goals/${goal.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
+    })
+    if (!response.ok) {
+      notify('Unable to delete goal')
+      return
+    }
+    setGoals(current => current.filter(item => item.id !== goal.id))
+    notify('Goal deleted')
+  }
+  const addContribution = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!contributingGoal?.id) return
+    const data = new FormData(event.currentTarget)
+    const amount = Number(data.get('amount'))
+    if (amount < 1) return
+    const response = await fetch(`${apiBase}/goals/${contributingGoal.id}/contributions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
+      body: JSON.stringify({ amount, contribution_date: data.get('date') }),
+    })
+    if (!response.ok) {
+      notify('Unable to add savings')
+      return
+    }
+    setGoals(current => current.map(item => item.id === contributingGoal.id ? { ...item, current: (item.current || 0) + amount } : item))
+    setContributingGoal(null)
+    notify('Savings contribution added')
+  }
 
   if (authLoading) return <div className="auth-shell"><div className="auth-loading">Loading FinApp…</div></div>
   if (!authUser) return <AuthScreen initialError={authError} onAuthenticated={(user, tokens) => {
@@ -273,10 +349,11 @@ function App() {
       }),
     })
     if (!response.ok) throw new Error('Unable to save your setup. Please check that the backend is running.')
-    const saved = await response.json() as { bills: Bill[] }
+    const saved = await response.json() as { bills: Bill[]; goals: Goal[] }
     localStorage.setItem(`finapp_onboarding_${authUser.id}`, JSON.stringify(data))
     setTransactions([])
     setBills(saved.bills.map(item => ({ ...item, amount: Number(item.amount) })))
+    setGoals(saved.goals.map(item => ({ ...item, target: Number(item.target), monthly: Number(item.monthly), current: 0 })))
     setOnboarding(data)
   }} />
   return <div className={`${theme === 'dark' ? 'app dark' : 'app'} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -293,13 +370,15 @@ function App() {
         {view === 'Budget' && <Budget allocations={summary?.allocations ?? []} onAdd={() => notify('Budget editing is ready for your next allocation.')} />}
         {view === 'Transactions' && <Transactions transactions={transactions} onAdd={openTransactionForm} onEdit={editTransaction} onDelete={deleteTransaction} />}
         {view === 'Bills' && <Bills bills={bills} onAdd={() => openBillForm()} onEdit={openBillForm} onDelete={deleteBill} />}
-        {view === 'Goals' && <Goals goals={onboarding.goals} onAdd={() => notify('Goal editing will be connected in the next update.')} />}
+        {view === 'Goals' && <Goals goals={goals} onAdd={() => openGoalForm()} onEdit={openGoalForm} onDelete={deleteGoal} onContribute={setContributingGoal} />}
         {view === 'Reports' && <Reports expenses={expenses} income={income} allocations={summary?.allocations ?? []} />}
         {view === 'Settings' && <Settings theme={theme} setTheme={setTheme} onSave={() => notify('Settings saved')} />}
       </div>
     </main>
     {showForm && <TransactionModal type={transactionType} transaction={editingTransaction} onClose={() => { setShowForm(false); setEditingTransaction(null) }} onSubmit={addTransaction} />}
     {showBillForm && <BillModal bill={editingBill} onClose={() => { setShowBillForm(false); setEditingBill(null) }} onSubmit={saveBill} />}
+    {showGoalForm && <GoalModal goal={editingGoal} onClose={() => { setShowGoalForm(false); setEditingGoal(null) }} onSubmit={saveGoal} />}
+    {contributingGoal && <ContributionModal goal={contributingGoal} onClose={() => setContributingGoal(null)} onSubmit={addContribution} />}
     {toast && <div className="toast">✓ {toast}</div>}
   </div>
 }
@@ -436,7 +515,9 @@ function Budget({ allocations, onAdd }: { allocations: { name: string; planned: 
 function Transactions({ transactions, onAdd, onEdit, onDelete }: { transactions: Transaction[]; onAdd: (type: 'Expense' | 'Income') => void; onEdit: (transaction: Transaction) => void; onDelete: (transaction: Transaction) => void }) { const [query, setQuery] = useState(''); const filtered = transactions.filter(t => t.description.toLowerCase().includes(query.toLowerCase()) || t.category.toLowerCase().includes(query.toLowerCase())); return <><PageHeading title="Transactions" description="A clear history of where your money goes." action={<TransactionActions onAdd={onAdd} />} /><div className="card transactions-card"><div className="filters"><label className="search">⌕ <input placeholder="Search transactions" value={query} onChange={e => setQuery(e.target.value)} /></label><button className="filter-button">All types ▾</button><button className="filter-button">All categories ▾</button><button className="filter-button">September ▾</button></div><TransactionList transactions={filtered} onEdit={onEdit} onDelete={onDelete} /></div></> }
 function Bills({ bills, onAdd, onEdit, onDelete }: { bills: Bill[]; onAdd: () => void; onEdit: (bill: Bill) => void; onDelete: (bill: Bill) => void }) { return <><PageHeading title="Bills" description="Stay ahead of recurring payments and one-time debts." action={<button className="primary" onClick={onAdd}>＋ Add bill</button>} /><div className="bill-grid">{bills.map((bill, index) => <div className="card bill-card" key={bill.id || `${bill.name}-${index}`}><div className="bill-top"><span className="bill-icon">ϟ</span><span className="status neutral">{bill.frequency}</span></div><h2>{bill.name}</h2><p>{bill.frequency === 'Recurring' ? `Due on day ${bill.due_day}` : 'One-time debt'}</p><div className="bill-amount"><span>Amount <b>{money(bill.amount)}</b></span></div><div className="progress"><span style={{ width: '0%' }} /></div><div className="bill-actions"><button className="transaction-action" onClick={() => onEdit(bill)}>Edit</button><button className="transaction-action delete" onClick={() => onDelete(bill)}>Delete</button></div></div>)}</div>{bills.length === 0 && <div className="card empty-state">No bills or debts have been added yet.</div>}</> }
 function BillModal({ bill, onClose, onSubmit }: { bill: Bill | null; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) { return <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}><form className="modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">Planned payment</span><h2>{bill ? 'Edit bill' : 'Add bill'}</h2></div><button type="button" className="close" onClick={onClose}>×</button></div><label>Name<input name="name" defaultValue={bill?.name || ''} placeholder="e.g. Rent or loan payment" required /></label><label>Amount<div className="amount-input"><span>RWF</span><input name="amount" type="number" min="1" defaultValue={bill?.amount || ''} placeholder="0" required /></div></label><div className="form-row"><label>Frequency<select name="frequency" defaultValue={bill?.frequency || 'Recurring'}><option>Recurring</option><option>One-time</option></select></label><label>Due day<input name="due_day" type="number" min="1" max="31" defaultValue={bill?.due_day || 1} required /></label></div><button className="primary full" type="submit">Save bill</button></form></div> }
-function Goals({ goals, onAdd }: { goals: { name: string; target: number; monthly: number }[]; onAdd: () => void }) { return <><PageHeading title="Savings goals" description="Give your money a purpose, one goal at a time." action={<button className="primary" onClick={onAdd}>＋ New goal</button>} /><div className="goal-grid">{goals.map((goal, index) => <div className="card big-goal" key={goal.name}><div className="goal-header"><span className={`goal-icon ${index % 2 ? 'purple' : 'orange'}`}>✦</span><span className="status good">On track</span></div><h2>{goal.name}</h2><p>Monthly target: {money(goal.monthly)}</p><strong className="goal-number">{money(0)} <small>of {money(goal.target)}</small></strong><div className="progress large"><span style={{ width: '0%' }} /></div><div className="goal-meta"><span>0% complete</span><span>Target: {money(goal.target)}</span></div><button className="secondary full">＋ Add savings</button></div>)}</div>{goals.length === 0 && <div className="card empty-state">No savings goals have been added yet.</div>}</> }
+function Goals({ goals, onAdd, onEdit, onDelete, onContribute }: { goals: Goal[]; onAdd: () => void; onEdit: (goal: Goal) => void; onDelete: (goal: Goal) => void; onContribute: (goal: Goal) => void }) { return <><PageHeading title="Savings goals" description="Give your money a purpose, one goal at a time." action={<button className="primary" onClick={onAdd}>＋ New goal</button>} /><div className="goal-grid">{goals.map((goal, index) => { const current = goal.current || 0; const percent = goal.target ? Math.min(100, Math.round(current / goal.target * 100)) : 0; return <div className="card big-goal" key={goal.id || `${goal.name}-${index}`}><div className="goal-header"><span className={`goal-icon ${index % 2 ? 'purple' : 'orange'}`}>✦</span><span className={`status ${percent >= 100 ? 'good' : 'neutral'}`}>{percent >= 100 ? 'Complete' : goal.status === 'COMPLETED' ? 'Complete' : 'On track'}</span></div><h2>{goal.name}</h2><p>Monthly target: {money(goal.monthly)}</p><strong className="goal-number">{money(current)} <small>of {money(goal.target)}</small></strong><div className="progress large"><span style={{ width: `${percent}%` }} /></div><div className="goal-meta"><span>{percent}% complete</span><span>Target: {money(goal.target)}</span></div><div className="goal-actions"><button className="secondary" onClick={() => onContribute(goal)}>＋ Add savings</button><button className="transaction-action" onClick={() => onEdit(goal)}>Edit</button><button className="transaction-action delete" onClick={() => onDelete(goal)}>Delete</button></div></div> })}</div>{goals.length === 0 && <div className="card empty-state">No savings goals have been added yet.</div>}</> }
+function GoalModal({ goal, onClose, onSubmit }: { goal: Goal | null; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) { return <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}><form className="modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">Savings plan</span><h2>{goal ? 'Edit goal' : 'New goal'}</h2></div><button type="button" className="close" onClick={onClose}>×</button></div><label>Name<input name="name" defaultValue={goal?.name || ''} placeholder="e.g. Emergency fund" required /></label><label>Target amount<div className="amount-input"><span>RWF</span><input name="target" type="number" min="1" defaultValue={goal?.target || ''} placeholder="0" required /></div></label><label>Monthly contribution<div className="amount-input"><span>RWF</span><input name="monthly" type="number" min="0" defaultValue={goal?.monthly || ''} placeholder="0" /></div></label><button className="primary full" type="submit">Save goal</button></form></div> }
+function ContributionModal({ goal, onClose, onSubmit }: { goal: Goal; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) { return <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}><form className="modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">Savings contribution</span><h2>Add to {goal.name}</h2></div><button type="button" className="close" onClick={onClose}>×</button></div><label>Amount<div className="amount-input"><span>RWF</span><input name="amount" type="number" min="1" placeholder="0" required autoFocus /></div></label><label>Date<input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required /></label><button className="primary full" type="submit">Add savings</button></form></div> }
 function Reports({ expenses, income, allocations }: { expenses: number; income: number; allocations: { name: string; planned: number; spent: number }[] }) { return <><PageHeading title="Reports" description="The story behind your money this month." action={<button className="secondary">⇩ Export report</button>} /><div className="report-grid"><div className="card report-chart"><div className="section-title"><div><h2>Income vs expenses</h2><p>Current monthly comparison</p></div><span className="pill">This month</span></div><div className="line-chart"><div className="line income-line" /><div className="line expense-line" /><span>Income {money(income)}</span><span>Expenses {money(expenses)}</span></div><div className="chart-legend"><span><i className="dot orange" />Income</span><span><i className="dot blue" />Expenses</span></div></div><div className="card insight"><span className="insight-icon">✧</span><h2>{income >= expenses ? 'You are on track' : 'Review your spending'}</h2><p>{income >= expenses ? `You have ${money(income - expenses)} more income than expenses this month.` : `Your expenses exceed income by ${money(expenses - income)} this month.`}</p></div></div><div className="card category-report"><div className="section-title"><div><h2>Spending by category</h2><p>Where your money went</p></div></div>{allocations.map(item => <div className="report-row" key={item.name}><span className="category-icon">•</span><b>{item.name}</b><div className="report-bar"><span style={{ width: `${expenses ? Math.min(100, item.spent / expenses * 100) : 0}%` }} /></div><strong>{money(item.spent)}</strong></div>)}</div></> }
 function Settings({ theme, setTheme, onSave }: { theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void; onSave: () => void }) { return <><PageHeading title="Settings" description="Make FinApp feel like yours." /><div className="settings-grid"><section className="card settings-card"><h2>Profile</h2><p>Personalise your workspace.</p><label>Full name<input defaultValue="Alex Morgan" /></label><label>Email address<input defaultValue="alex@example.com" /></label><button className="primary" onClick={onSave}>Save changes</button></section><section className="card settings-card"><h2>Appearance</h2><p>Choose how FinApp looks for you.</p><div className="theme-options"><button className={theme === 'light' ? 'theme active' : 'theme'} onClick={() => setTheme('light')}>☼<b>Light</b><small>Warm and bright</small></button><button className={theme === 'dark' ? 'theme active' : 'theme'} onClick={() => setTheme('dark')}>☾<b>Dark</b><small>Easy on the eyes</small></button></div><h2 className="settings-subtitle">Preferences</h2><label className="toggle-row">Monthly summary emails <input type="checkbox" defaultChecked /></label><label className="toggle-row">Show cents in amounts <input type="checkbox" /></label></section></div></> }
 function TransactionModal({ type, transaction, onClose, onSubmit }: { type: 'Expense' | 'Income'; transaction: Transaction | null; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) { const isIncome = type === 'Income'; const dateValue = transaction?.transactionDate || new Date().toISOString().slice(0, 10); return <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}><form className="modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">{isIncome ? 'Money in' : 'Money out'}</span><h2>{transaction ? 'Edit' : 'Add'} {type.toLowerCase()}</h2></div><button type="button" className="close" onClick={onClose}>×</button></div><div className={`transaction-type-banner ${isIncome ? 'income-banner' : 'expense-banner'}`}>{isIncome ? '＋ Recording money you earned' : '− Recording money you spent'}</div><label>Amount <div className="amount-input"><span>RWF</span><input name="amount" type="number" placeholder="0" defaultValue={transaction?.amount || ''} autoFocus required /></div></label><label>{isIncome ? 'Source' : 'Description'}<input name="description" defaultValue={transaction?.description || ''} placeholder={isIncome ? 'e.g. Salary or freelance payment' : 'e.g. Lunch with a friend'} required /></label><div className="form-row"><label>Category<select name="category" defaultValue={transaction?.category || (isIncome ? 'Income' : 'Food')}>{isIncome ? <><option>Income</option><option>Salary</option><option>Freelance</option><option>Other</option></> : <><option>Food</option><option>Transport</option><option>Bills</option><option>Entertainment</option><option>Other</option></>}</select></label>{!isIncome && <label>Need or want<select name="need" defaultValue={transaction?.need || 'Need'}><option>Need</option><option>Want</option></select></label>}</div><label>Date<input name="date" type="date" defaultValue={dateValue} /></label><button className={`primary full ${isIncome ? 'income-submit' : ''}`} type="submit">Save {type.toLowerCase()}</button></form></div> }
