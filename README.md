@@ -2,7 +2,7 @@
 
 FinApp is a responsive personal finance application for planning income, tracking spending, managing bills, and monitoring savings goals.
 
-> **Current status:** The responsive frontend MVP, PostgreSQL schema, and Phase 4 authentication foundation are implemented. Financial data is still mock/in-memory in the frontend; authenticated financial APIs and frontend API integration are next.
+> **Current status:** The responsive frontend MVP, PostgreSQL schema, Phase 4 authentication foundation, frontend login/register flow, and first-use onboarding are implemented. Financial data is still local to the signed-in browser; authenticated financial APIs are next.
 
 ## Local development
 
@@ -63,6 +63,37 @@ The backend now exposes:
 - `GET /api/v1/auth/me`
 
 Set a strong `JWT_SECRET_KEY` in `backend\.env` before using authentication outside local development. Access tokens are short-lived JWTs; refresh tokens are stored only as SHA-256 hashes and are rotated when refreshed.
+
+The frontend uses `http://127.0.0.1:8000` by default for the API. To use another backend URL, create a root `.env` file with:
+
+```env
+VITE_API_URL=http://127.0.0.1:8000
+```
+
+Start the backend before opening the frontend. The first screen allows a user to register or sign in, restores an existing session, and provides sign out from the workspace profile.
+
+After the first sign-in, FinApp guides each user through a four-step setup:
+
+1. Opening balance and expected monthly income.
+2. Planned allocations and spending amounts.
+3. Recurring bills and one-time debts.
+4. Starter savings goals and monthly contributions.
+
+The current onboarding data is stored per user in browser local storage and is used immediately for the dashboard opening balance and income calculations. The next financial API phase will persist this setup in PostgreSQL.
+
+The setup persistence API is now available:
+
+- `GET /api/v1/setup`
+- `PUT /api/v1/setup`
+
+These endpoints require the signed-in user's bearer token and persist the monthly plan, income source, allocations, bills/debts, and savings goals. The frontend saves onboarding through this API and uses browser storage only as a fallback if the API is temporarily unavailable.
+
+Authenticated transaction endpoints are also available:
+
+- `GET /api/v1/transactions`
+- `POST /api/v1/transactions`
+
+Income and Expense entries from the frontend are now stored against the signed-in user in PostgreSQL and loaded back into the dashboard and Transactions view.
 
 ## Current frontend features
 

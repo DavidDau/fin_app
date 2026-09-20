@@ -1,3 +1,6 @@
+from datetime import date
+from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -45,3 +48,69 @@ class RefreshTokenResponse(BaseModel):
 
 class AuthenticatedUserResponse(UserResponse):
     pass
+
+
+class SetupAllocation(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    amount: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+
+
+class SetupBill(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    frequency: Literal["One-time", "Recurring"]
+
+
+class SetupGoal(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    target: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    monthly: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+
+
+class SetupRequest(BaseModel):
+    month_start: date
+    opening_balance: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+    monthly_income: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+    allocations: list[SetupAllocation] = Field(default_factory=list, max_length=50)
+    bills: list[SetupBill] = Field(default_factory=list, max_length=50)
+    goals: list[SetupGoal] = Field(default_factory=list, max_length=50)
+
+
+class SetupAllocationResponse(SetupAllocation):
+    category_id: UUID
+
+
+class SetupBillResponse(SetupBill):
+    id: UUID
+
+
+class SetupGoalResponse(SetupGoal):
+    id: UUID
+
+
+class SetupResponse(BaseModel):
+    month_start: date
+    opening_balance: Decimal
+    monthly_income: Decimal
+    allocations: list[SetupAllocationResponse]
+    bills: list[SetupBillResponse]
+    goals: list[SetupGoalResponse]
+
+
+class TransactionCreate(BaseModel):
+    transaction_date: date
+    transaction_type: Literal["INCOME", "EXPENSE"]
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    category: str = Field(min_length=1, max_length=100)
+    description: str = Field(min_length=1, max_length=255)
+    need_want: Literal["NEED", "WANT"] | None = None
+
+
+class TransactionResponse(BaseModel):
+    id: UUID
+    transaction_date: date
+    transaction_type: Literal["INCOME", "EXPENSE"]
+    amount: Decimal
+    category: str
+    description: str
+    need_want: Literal["NEED", "WANT"] | None

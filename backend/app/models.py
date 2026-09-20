@@ -212,6 +212,7 @@ class Bill(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     due_day: Mapped[int] = mapped_column(nullable=False)
     monthly_amount: Mapped[Decimal] = mapped_column(Money, nullable=False)
+    frequency: Mapped[str] = mapped_column(String(20), nullable=False, default="RECURRING")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     user: Mapped[User] = relationship(back_populates="bills")
