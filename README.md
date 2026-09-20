@@ -101,6 +101,8 @@ Monthly reporting is available at:
 
 The dashboard uses this summary to calculate opening balance, planned and actual income, expenses, available balance, and allocation spending for the selected month. Month-filtered transaction loading uses the complete calendar month range.
 
+The Budget, Bills, Goals, and Reports views now read their values from the authenticated setup and monthly summary data. Empty states are shown when a signed-in user has not configured allocations, bills, or goals.
+
 ## Current frontend features
 
 - FinApp coin-style branding.
