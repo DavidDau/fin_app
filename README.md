@@ -79,7 +79,7 @@ After the first sign-in, FinApp guides each user through a four-step setup:
 3. Recurring bills and one-time debts.
 4. Starter savings goals and monthly contributions.
 
-The current onboarding data is stored per user in browser local storage and is used immediately for the dashboard opening balance and income calculations. The next financial API phase will persist this setup in PostgreSQL.
+The onboarding data is persisted per user in PostgreSQL and is used for the dashboard opening balance and income calculations. Browser local storage remains as a fallback for setup loading if the API is temporarily unavailable.
 
 The setup persistence API is now available:
 
@@ -92,8 +92,19 @@ Authenticated transaction endpoints are also available:
 
 - `GET /api/v1/transactions`
 - `POST /api/v1/transactions`
+- `PUT /api/v1/transactions/{transaction_id}`
+- `DELETE /api/v1/transactions/{transaction_id}`
 
 Income and Expense entries from the frontend are now stored against the signed-in user in PostgreSQL and loaded back into the dashboard and Transactions view.
+
+Bills have independent authenticated CRUD endpoints:
+
+- `GET /api/v1/bills`
+- `POST /api/v1/bills`
+- `PUT /api/v1/bills/{bill_id}`
+- `DELETE /api/v1/bills/{bill_id}`
+
+The Bills view supports adding, editing, and deleting recurring payments and one-time debts. Bill records are scoped to the signed-in user and include an amount, frequency, and due day.
 
 Monthly reporting is available at:
 

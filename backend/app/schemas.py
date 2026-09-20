@@ -84,6 +84,21 @@ class SetupBillResponse(SetupBill):
     id: UUID
 
 
+class BillCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    frequency: Literal["One-time", "Recurring"]
+    due_day: int = Field(default=1, ge=1, le=31)
+
+
+class BillResponse(BillCreate):
+    id: UUID
+
+
+class BillUpdate(BillCreate):
+    pass
+
+
 class SetupGoalResponse(SetupGoal):
     id: UUID
 

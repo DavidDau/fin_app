@@ -111,7 +111,7 @@ def update_transaction(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> TransactionResponse:
-    transaction, old_category = _owned_transaction(db, current_user, transaction_id)
+    transaction, _ = _owned_transaction(db, current_user, transaction_id)
     now = _utcnow()
     category_type = CategoryType.INCOME.value if payload.transaction_type == "INCOME" else CategoryType.EXPENSE.value
     category = db.scalar(

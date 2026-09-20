@@ -1,22 +1,12 @@
 import unittest
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, create_engine, inspect
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import (
-    Bill,
-    BudgetLine,
-    Category,
-    Goal,
-    GoalContribution,
-    IncomeSource,
-    MonthlyPlan,
-    Transaction,
-    User,
-    UserSettings,
-)
+from app import models  # pyright: ignore[reportUnusedImport]
+from app.models import Bill, MonthlyPlan
 
 
 class SchemaTests(unittest.TestCase):
