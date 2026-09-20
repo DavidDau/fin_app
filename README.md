@@ -68,7 +68,7 @@ Set a strong `JWT_SECRET_KEY` in `backend\.env` before using authentication outs
 
 - FinApp coin-style branding.
 - Dashboard with balance, income, expenses, savings, budget, goals, and recent transactions.
-- In-memory transaction creation with immediate dashboard updates.
+- Separate Income and Expense transaction actions with immediate dashboard updates.
 - Budget, transactions, bills, goals, reports, and settings views.
 - Month selector and light/dark theme controls.
 - Collapsible desktop sidebar.
