@@ -1,7 +1,7 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react'
 
 type View = 'Dashboard' | 'Budget' | 'Transactions' | 'Bills' | 'Goals' | 'Reports' | 'Settings'
-type Transaction = { id: number | string; date: string; description: string; category: string; amount: number; type: 'Expense' | 'Income'; need: 'Need' | 'Want' }
+type Transaction = { id: number | string; date: string; transactionDate?: string; description: string; category: string; amount: number; type: 'Expense' | 'Income'; need: 'Need' | 'Want' }
 type AuthMode = 'login' | 'register'
 type AuthUser = { id: string; email: string; display_name: string | null; is_active: boolean }
 type AuthTokens = { access_token: string; refresh_token: string; token_type: string }
@@ -47,6 +47,7 @@ function App() {
   const [month, setMonth] = useState('September 2026')
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [showForm, setShowForm] = useState(false)
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
   const [transactionType, setTransactionType] = useState<'Expense' | 'Income'>('Expense')
   const [toast, setToast] = useState('')
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
@@ -108,6 +109,7 @@ function App() {
       .then(items => setTransactions(items.map(item => ({
         id: item.id,
         date: new Date(`${item.transaction_date}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        transactionDate: item.transaction_date,
         description: item.description,
         category: item.category,
         amount: Number(item.amount),
@@ -130,16 +132,35 @@ function App() {
   const income = summary?.total_income ?? transactions.filter(t => t.type === 'Income').reduce((s, t) => s + t.amount, 0) + (onboarding?.monthlyIncome || 0)
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2600) }
   const openTransactionForm = (type: 'Expense' | 'Income') => {
+    setEditingTransaction(null)
     setTransactionType(type)
     setShowForm(true)
+  }
+  const editTransaction = (transaction: Transaction) => {
+    setEditingTransaction(transaction)
+    setTransactionType(transaction.type)
+    setShowForm(true)
+  }
+  const deleteTransaction = async (transaction: Transaction) => {
+    if (!window.confirm('Delete this transaction?')) return
+    const response = await fetch(`${apiBase}/transactions/${transaction.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
+    })
+    if (!response.ok) {
+      notify('Unable to delete transaction')
+      return
+    }
+    setTransactions(current => current.filter(item => item.id !== transaction.id))
+    notify('Transaction deleted')
   }
   const addTransaction = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
     const amount = Number(data.get('amount'))
     if (!amount || amount < 1) return
-    const response = await fetch(`${apiBase}/transactions`, {
-      method: 'POST',
+    const response = await fetch(`${apiBase}/transactions${editingTransaction ? `/${editingTransaction.id}` : ''}`, {
+      method: editingTransaction ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` },
       body: JSON.stringify({
         transaction_date: data.get('date'),
@@ -155,16 +176,21 @@ function App() {
       return
     }
     const item = await response.json() as TransactionResponse
-    setTransactions(current => [{
+    const savedTransaction: Transaction = {
       id: item.id,
       date: new Date(`${item.transaction_date}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      transactionDate: item.transaction_date,
       description: item.description,
       category: item.category,
       amount: Number(item.amount),
       type: item.transaction_type === 'INCOME' ? 'Income' : 'Expense',
       need: item.need_want === 'WANT' ? 'Want' : 'Need',
-    }, ...current])
+    }
+    setTransactions(current => editingTransaction
+      ? current.map(existing => existing.id === editingTransaction.id ? savedTransaction : existing)
+      : [savedTransaction, ...current])
     setShowForm(false)
+    setEditingTransaction(null)
     notify('Transaction saved successfully')
   }
 
@@ -205,14 +231,14 @@ function App() {
       <div className="content">
         {view === 'Dashboard' && <Dashboard month={month} expenses={expenses} income={income} openingBalance={summary?.opening_balance ?? onboarding.openingBalance} allocations={summary?.allocations ?? []} transactions={transactions} onAdd={openTransactionForm} onNavigate={setView} />}
         {view === 'Budget' && <Budget allocations={summary?.allocations ?? []} onAdd={() => notify('Budget editing is ready for your next allocation.')} />}
-        {view === 'Transactions' && <Transactions transactions={transactions} onAdd={openTransactionForm} />}
+        {view === 'Transactions' && <Transactions transactions={transactions} onAdd={openTransactionForm} onEdit={editTransaction} onDelete={deleteTransaction} />}
         {view === 'Bills' && <Bills bills={onboarding.bills} onAdd={() => notify('Bill editing will be connected in the next update.')} />}
         {view === 'Goals' && <Goals goals={onboarding.goals} onAdd={() => notify('Goal editing will be connected in the next update.')} />}
         {view === 'Reports' && <Reports expenses={expenses} income={income} allocations={summary?.allocations ?? []} />}
         {view === 'Settings' && <Settings theme={theme} setTheme={setTheme} onSave={() => notify('Settings saved')} />}
       </div>
     </main>
-    {showForm && <TransactionModal type={transactionType} onClose={() => setShowForm(false)} onSubmit={addTransaction} />}
+    {showForm && <TransactionModal type={transactionType} transaction={editingTransaction} onClose={() => { setShowForm(false); setEditingTransaction(null) }} onSubmit={addTransaction} />}
     {toast && <div className="toast">✓ {toast}</div>}
   </div>
 }
@@ -341,16 +367,16 @@ function Dashboard({ month, expenses, income, openingBalance, allocations, trans
   </>
 }
 function Kpi({ label, value, change, tone, icon }: { label: string; value: string; change: string; tone: string; icon: string }) { return <div className="card kpi"><div className={`kpi-icon ${tone}`}>{icon}</div><small>{label}</small><strong>{value}</strong><span className={change.startsWith('-') ? 'negative' : 'positive'}>{change.startsWith('-') ? '↓' : '↑'} {change} <em>vs last month</em></span></div> }
-function TransactionList({ transactions }: { transactions: Transaction[] }) { return <div className="transaction-list">{transactions.map(t => <div className="transaction" key={t.id}><div className={`transaction-icon ${t.category.toLowerCase()}`}>{t.category === 'Food' ? '⌁' : t.category === 'Transport' ? '↗' : t.category === 'Income' ? '↙' : t.category === 'Bills' ? 'ϟ' : '♫'}</div><div className="transaction-desc"><strong>{t.description}</strong><small>{t.date} · {t.category}</small></div><b className={t.type === 'Income' ? 'income' : ''}>{t.type === 'Income' ? '+' : '-'}{money(t.amount).replace('RWF ', 'RWF ')}</b></div>)}</div> }
+function TransactionList({ transactions, onEdit, onDelete }: { transactions: Transaction[]; onEdit?: (transaction: Transaction) => void; onDelete?: (transaction: Transaction) => void }) { return <div className="transaction-list">{transactions.map(t => <div className="transaction" key={t.id}><div className={`transaction-icon ${t.category.toLowerCase()}`}>{t.category === 'Food' ? '⌁' : t.category === 'Transport' ? '↗' : t.category === 'Income' ? '↙' : t.category === 'Bills' ? 'ϟ' : '♫'}</div><div className="transaction-desc"><strong>{t.description}</strong><small>{t.date} · {t.category}</small></div><b className={t.type === 'Income' ? 'income' : ''}>{t.type === 'Income' ? '+' : '-'}{money(t.amount).replace('RWF ', 'RWF ')}</b>{onEdit && <button className="transaction-action" onClick={() => onEdit(t)} aria-label={`Edit ${t.description}`}>Edit</button>}{onDelete && <button className="transaction-action delete" onClick={() => onDelete(t)} aria-label={`Delete ${t.description}`}>×</button>}</div>)}</div> }
 function GoalMini({ title, current, target, color, icon }: { title: string; current: number; target: number; color: string; icon: string }) { return <div className="goal-mini"><div className={`goal-icon ${color}`}>{icon}</div><div className="goal-info"><strong>{title}</strong><span>{money(current)} <small>of {money(target)}</small></span><div className="progress"><span className={color} style={{ width: `${current / target * 100}%` }} /></div></div><b>{Math.round(current / target * 100)}%</b></div> }
 
 function Budget({ allocations, onAdd }: { allocations: { name: string; planned: number; spent: number }[]; onAdd: () => void }) { const plannedTotal = allocations.reduce((total, item) => total + item.planned, 0); const spentTotal = allocations.reduce((total, item) => total + item.spent, 0); const usedTotal = plannedTotal ? spentTotal / plannedTotal * 100 : 0; return <><PageHeading title="Monthly budget" description="Plan ahead and make every franc count." action={<button className="primary" onClick={onAdd}>＋ Edit allocations</button>} /><div className="card allocation-card"><div className="allocation-summary"><div><small>Total planned</small><strong>{money(plannedTotal)}</strong></div><div><small>Total spent</small><strong>{money(spentTotal)}</strong></div><div><small>Remaining</small><strong className="orange-text">{money(Math.max(0, plannedTotal - spentTotal))}</strong></div><div className="allocation-chart"><div className="donut small"><span>{Math.round(usedTotal)}%<small>used</small></span></div></div></div><div className="table-wrap"><table><thead><tr><th>Category</th><th>Planned</th><th>Actual</th><th>Remaining</th><th>Used</th><th>Status</th></tr></thead><tbody>{allocations.map(item => { const used = item.planned ? item.spent / item.planned * 100 : 0; return <tr key={item.name}><td><span className="category-icon">•</span><b>{item.name}</b></td><td>{money(item.planned)}</td><td>{money(item.spent)}</td><td className="orange-text">{money(Math.max(0, item.planned - item.spent))}</td><td><div className="table-progress"><span style={{ width: `${Math.min(100, used)}%` }} /></div><small>{Math.round(used)}%</small></td><td><span className={`status ${used > 70 ? 'warning' : 'good'}`}>{used > 70 ? 'Watch' : 'On track'}</span></td></tr> })}</tbody></table></div></div></> }
 
-function Transactions({ transactions, onAdd }: { transactions: Transaction[]; onAdd: (type: 'Expense' | 'Income') => void }) { const [query, setQuery] = useState(''); const filtered = transactions.filter(t => t.description.toLowerCase().includes(query.toLowerCase()) || t.category.toLowerCase().includes(query.toLowerCase())); return <><PageHeading title="Transactions" description="A clear history of where your money goes." action={<TransactionActions onAdd={onAdd} />} /><div className="card transactions-card"><div className="filters"><label className="search">⌕ <input placeholder="Search transactions" value={query} onChange={e => setQuery(e.target.value)} /></label><button className="filter-button">All types ▾</button><button className="filter-button">All categories ▾</button><button className="filter-button">September ▾</button></div><TransactionList transactions={filtered} /></div></> }
+function Transactions({ transactions, onAdd, onEdit, onDelete }: { transactions: Transaction[]; onAdd: (type: 'Expense' | 'Income') => void; onEdit: (transaction: Transaction) => void; onDelete: (transaction: Transaction) => void }) { const [query, setQuery] = useState(''); const filtered = transactions.filter(t => t.description.toLowerCase().includes(query.toLowerCase()) || t.category.toLowerCase().includes(query.toLowerCase())); return <><PageHeading title="Transactions" description="A clear history of where your money goes." action={<TransactionActions onAdd={onAdd} />} /><div className="card transactions-card"><div className="filters"><label className="search">⌕ <input placeholder="Search transactions" value={query} onChange={e => setQuery(e.target.value)} /></label><button className="filter-button">All types ▾</button><button className="filter-button">All categories ▾</button><button className="filter-button">September ▾</button></div><TransactionList transactions={filtered} onEdit={onEdit} onDelete={onDelete} /></div></> }
 function Bills({ bills, onAdd }: { bills: { name: string; amount: number; frequency: 'One-time' | 'Recurring' }[]; onAdd: () => void }) { return <><PageHeading title="Bills" description="Stay ahead of recurring payments and one-time debts." action={<button className="primary" onClick={onAdd}>＋ Add bill</button>} /><div className="bill-grid">{bills.map(bill => <div className="card bill-card" key={`${bill.name}-${bill.frequency}`}><div className="bill-top"><span className="bill-icon">ϟ</span><span className="status neutral">{bill.frequency}</span></div><h2>{bill.name}</h2><p>{bill.frequency === 'Recurring' ? 'Repeats monthly' : 'One-time debt'}</p><div className="bill-amount"><span>Amount <b>{money(bill.amount)}</b></span></div><div className="progress"><span style={{ width: '0%' }} /></div></div>)}</div>{bills.length === 0 && <div className="card empty-state">No bills or debts have been added yet.</div>}</> }
 function Goals({ goals, onAdd }: { goals: { name: string; target: number; monthly: number }[]; onAdd: () => void }) { return <><PageHeading title="Savings goals" description="Give your money a purpose, one goal at a time." action={<button className="primary" onClick={onAdd}>＋ New goal</button>} /><div className="goal-grid">{goals.map((goal, index) => <div className="card big-goal" key={goal.name}><div className="goal-header"><span className={`goal-icon ${index % 2 ? 'purple' : 'orange'}`}>✦</span><span className="status good">On track</span></div><h2>{goal.name}</h2><p>Monthly target: {money(goal.monthly)}</p><strong className="goal-number">{money(0)} <small>of {money(goal.target)}</small></strong><div className="progress large"><span style={{ width: '0%' }} /></div><div className="goal-meta"><span>0% complete</span><span>Target: {money(goal.target)}</span></div><button className="secondary full">＋ Add savings</button></div>)}</div>{goals.length === 0 && <div className="card empty-state">No savings goals have been added yet.</div>}</> }
 function Reports({ expenses, income, allocations }: { expenses: number; income: number; allocations: { name: string; planned: number; spent: number }[] }) { return <><PageHeading title="Reports" description="The story behind your money this month." action={<button className="secondary">⇩ Export report</button>} /><div className="report-grid"><div className="card report-chart"><div className="section-title"><div><h2>Income vs expenses</h2><p>Current monthly comparison</p></div><span className="pill">This month</span></div><div className="line-chart"><div className="line income-line" /><div className="line expense-line" /><span>Income {money(income)}</span><span>Expenses {money(expenses)}</span></div><div className="chart-legend"><span><i className="dot orange" />Income</span><span><i className="dot blue" />Expenses</span></div></div><div className="card insight"><span className="insight-icon">✧</span><h2>{income >= expenses ? 'You are on track' : 'Review your spending'}</h2><p>{income >= expenses ? `You have ${money(income - expenses)} more income than expenses this month.` : `Your expenses exceed income by ${money(expenses - income)} this month.`}</p></div></div><div className="card category-report"><div className="section-title"><div><h2>Spending by category</h2><p>Where your money went</p></div></div>{allocations.map(item => <div className="report-row" key={item.name}><span className="category-icon">•</span><b>{item.name}</b><div className="report-bar"><span style={{ width: `${expenses ? Math.min(100, item.spent / expenses * 100) : 0}%` }} /></div><strong>{money(item.spent)}</strong></div>)}</div></> }
 function Settings({ theme, setTheme, onSave }: { theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void; onSave: () => void }) { return <><PageHeading title="Settings" description="Make FinApp feel like yours." /><div className="settings-grid"><section className="card settings-card"><h2>Profile</h2><p>Personalise your workspace.</p><label>Full name<input defaultValue="Alex Morgan" /></label><label>Email address<input defaultValue="alex@example.com" /></label><button className="primary" onClick={onSave}>Save changes</button></section><section className="card settings-card"><h2>Appearance</h2><p>Choose how FinApp looks for you.</p><div className="theme-options"><button className={theme === 'light' ? 'theme active' : 'theme'} onClick={() => setTheme('light')}>☼<b>Light</b><small>Warm and bright</small></button><button className={theme === 'dark' ? 'theme active' : 'theme'} onClick={() => setTheme('dark')}>☾<b>Dark</b><small>Easy on the eyes</small></button></div><h2 className="settings-subtitle">Preferences</h2><label className="toggle-row">Monthly summary emails <input type="checkbox" defaultChecked /></label><label className="toggle-row">Show cents in amounts <input type="checkbox" /></label></section></div></> }
-function TransactionModal({ type, onClose, onSubmit }: { type: 'Expense' | 'Income'; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) { const isIncome = type === 'Income'; return <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}><form className="modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">{isIncome ? 'Money in' : 'Money out'}</span><h2>Add {type.toLowerCase()}</h2></div><button type="button" className="close" onClick={onClose}>×</button></div><div className={`transaction-type-banner ${isIncome ? 'income-banner' : 'expense-banner'}`}>{isIncome ? '＋ Recording money you earned' : '− Recording money you spent'}</div><label>Amount <div className="amount-input"><span>RWF</span><input name="amount" type="number" placeholder="0" autoFocus required /></div></label><label>{isIncome ? 'Source' : 'Description'}<input name="description" placeholder={isIncome ? 'e.g. Salary or freelance payment' : 'e.g. Lunch with a friend'} required /></label><div className="form-row"><label>Category<select name="category" defaultValue={isIncome ? 'Income' : 'Food'}>{isIncome ? <><option>Income</option><option>Salary</option><option>Freelance</option><option>Other</option></> : <><option>Food</option><option>Transport</option><option>Bills</option><option>Entertainment</option><option>Other</option></>}</select></label>{!isIncome && <label>Need or want<select name="need" defaultValue="Need"><option>Need</option><option>Want</option></select></label>}</div><label>Date<input type="date" defaultValue="2026-09-18" /></label><button className={`primary full ${isIncome ? 'income-submit' : ''}`} type="submit">Save {type.toLowerCase()}</button></form></div> }
+function TransactionModal({ type, transaction, onClose, onSubmit }: { type: 'Expense' | 'Income'; transaction: Transaction | null; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) { const isIncome = type === 'Income'; const dateValue = transaction?.transactionDate || new Date().toISOString().slice(0, 10); return <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}><form className="modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">{isIncome ? 'Money in' : 'Money out'}</span><h2>{transaction ? 'Edit' : 'Add'} {type.toLowerCase()}</h2></div><button type="button" className="close" onClick={onClose}>×</button></div><div className={`transaction-type-banner ${isIncome ? 'income-banner' : 'expense-banner'}`}>{isIncome ? '＋ Recording money you earned' : '− Recording money you spent'}</div><label>Amount <div className="amount-input"><span>RWF</span><input name="amount" type="number" placeholder="0" defaultValue={transaction?.amount || ''} autoFocus required /></div></label><label>{isIncome ? 'Source' : 'Description'}<input name="description" defaultValue={transaction?.description || ''} placeholder={isIncome ? 'e.g. Salary or freelance payment' : 'e.g. Lunch with a friend'} required /></label><div className="form-row"><label>Category<select name="category" defaultValue={transaction?.category || (isIncome ? 'Income' : 'Food')}>{isIncome ? <><option>Income</option><option>Salary</option><option>Freelance</option><option>Other</option></> : <><option>Food</option><option>Transport</option><option>Bills</option><option>Entertainment</option><option>Other</option></>}</select></label>{!isIncome && <label>Need or want<select name="need" defaultValue={transaction?.need || 'Need'}><option>Need</option><option>Want</option></select></label>}</div><label>Date<input name="date" type="date" defaultValue={dateValue} /></label><button className={`primary full ${isIncome ? 'income-submit' : ''}`} type="submit">Save {type.toLowerCase()}</button></form></div> }
 
 export default App

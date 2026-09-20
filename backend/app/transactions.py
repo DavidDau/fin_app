@@ -2,14 +2,14 @@ from calendar import monthrange
 from datetime import date, datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import Category, CategoryType, Transaction, TransactionType, User
-from app.schemas import TransactionCreate, TransactionResponse
+from app.schemas import TransactionCreate, TransactionResponse, TransactionUpdate
 
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -91,3 +91,64 @@ def create_transaction(
     db.commit()
     db.refresh(transaction)
     return _response(transaction, category)
+
+
+def _owned_transaction(db: Session, user: User, transaction_id: str) -> tuple[Transaction, Category]:
+    transaction, category = db.execute(
+        select(Transaction, Category)
+        .join(Category, Transaction.category_id == Category.id)
+        .where(Transaction.id == transaction_id, Transaction.user_id == user.id)
+    ).one_or_none() or (None, None)
+    if transaction is None or category is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+    return transaction, category
+
+
+@router.put("/{transaction_id}", response_model=TransactionResponse)
+def update_transaction(
+    transaction_id: str,
+    payload: TransactionUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> TransactionResponse:
+    transaction, old_category = _owned_transaction(db, current_user, transaction_id)
+    now = _utcnow()
+    category_type = CategoryType.INCOME.value if payload.transaction_type == "INCOME" else CategoryType.EXPENSE.value
+    category = db.scalar(
+        select(Category).where(
+            Category.user_id == current_user.id,
+            Category.name == payload.category,
+            Category.category_type == category_type,
+        )
+    )
+    if category is None:
+        category = Category(
+            user_id=current_user.id,
+            name=payload.category,
+            category_type=category_type,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(category)
+        db.flush()
+    transaction.transaction_date = payload.transaction_date
+    transaction.transaction_type = payload.transaction_type
+    transaction.category_id = category.id
+    transaction.amount = payload.amount
+    transaction.description = payload.description
+    transaction.need_want = payload.need_want
+    transaction.updated_at = now
+    db.commit()
+    db.refresh(transaction)
+    return _response(transaction, category)
+
+
+@router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_transaction(
+    transaction_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    transaction, _ = _owned_transaction(db, current_user, transaction_id)
+    db.delete(transaction)
+    db.commit()

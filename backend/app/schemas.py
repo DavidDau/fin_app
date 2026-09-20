@@ -106,6 +106,10 @@ class TransactionCreate(BaseModel):
     need_want: Literal["NEED", "WANT"] | None = None
 
 
+class TransactionUpdate(TransactionCreate):
+    pass
+
+
 class TransactionResponse(BaseModel):
     id: UUID
     transaction_date: date
