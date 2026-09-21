@@ -116,9 +116,6 @@ def save_setup(
 
     db.execute(delete(BudgetLine).where(BudgetLine.monthly_plan_id == plan.id))
     db.execute(delete(IncomeSource).where(IncomeSource.monthly_plan_id == plan.id))
-    db.execute(delete(Bill).where(Bill.user_id == current_user.id))
-    db.execute(delete(Goal).where(Goal.user_id == current_user.id))
-
     for allocation in payload.allocations:
         category = db.scalar(
             select(Category).where(
@@ -176,32 +173,44 @@ def save_setup(
         db.add(bill_category)
         db.flush()
     for bill in payload.bills:
-        db.add(
-            Bill(
+        existing_bill = db.scalar(
+            select(Bill).where(
+                Bill.user_id == current_user.id,
+                Bill.name == bill.name,
+            )
+        )
+        if existing_bill is None:
+            existing_bill = Bill(
                 user_id=current_user.id,
                 category_id=bill_category.id,
                 name=bill.name,
                 due_day=1,
-                monthly_amount=bill.amount,
-                frequency="ONE_TIME" if bill.frequency == "One-time" else "RECURRING",
                 created_at=now,
-                updated_at=now,
             )
-        )
+            db.add(existing_bill)
+        existing_bill.monthly_amount = bill.amount
+        existing_bill.frequency = "ONE_TIME" if bill.frequency == "One-time" else "RECURRING"
+        existing_bill.updated_at = now
 
     for goal in payload.goals:
-        db.add(
-            Goal(
+        existing_goal = db.scalar(
+            select(Goal).where(
+                Goal.user_id == current_user.id,
+                Goal.name == goal.name,
+            )
+        )
+        if existing_goal is None:
+            existing_goal = Goal(
                 user_id=current_user.id,
                 name=goal.name,
                 goal_type="SAVING",
-                target_amount=goal.target,
-                monthly_target=goal.monthly,
                 status=GoalStatus.ACTIVE.value,
                 created_at=now,
-                updated_at=now,
             )
-        )
+            db.add(existing_goal)
+        existing_goal.target_amount = goal.target
+        existing_goal.monthly_target = goal.monthly
+        existing_goal.updated_at = now
     db.commit()
     db.refresh(plan)
     return _response(db, current_user, plan)

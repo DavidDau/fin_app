@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import BudgetLine, Category, MonthlyPlan, Transaction, TransactionType, User
+from app.models import BudgetLine, Category, Goal, GoalContribution, MonthlyPlan, Transaction, TransactionType, User
 from app.schemas import MonthlyAllocationSummary, MonthlySummaryResponse
 
 
@@ -50,6 +50,14 @@ def monthly_summary(
             Transaction.transaction_date.between(month_start, month_end),
         )
     ) or Decimal("0")
+    actual_savings = db.scalar(
+        select(func.coalesce(func.sum(GoalContribution.amount), 0))
+        .join(Goal, Goal.id == GoalContribution.goal_id)
+        .where(
+            Goal.user_id == current_user.id,
+            GoalContribution.contribution_date.between(month_start, month_end),
+        )
+    ) or Decimal("0")
 
     allocations: list[MonthlyAllocationSummary] = []
     if plan:
@@ -83,7 +91,7 @@ def monthly_summary(
             for name, planned, spent in rows
         ]
 
-    total_income = planned_income + actual_income
+    total_income = actual_income
     return MonthlySummaryResponse(
         month_start=month_start,
         opening_balance=opening_balance,
@@ -91,6 +99,6 @@ def monthly_summary(
         actual_income=actual_income,
         total_income=total_income,
         total_expenses=total_expenses,
-        available_balance=opening_balance + total_income - total_expenses,
+        available_balance=total_income - total_expenses - actual_savings,
         allocations=allocations,
     )

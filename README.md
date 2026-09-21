@@ -13,6 +13,14 @@ npm install
 npm run dev
 ```
 
+Run the frontend unit tests with:
+
+```powershell
+npm test
+```
+
+The current frontend tests cover shared financial formatting utilities. Add feature and browser-flow coverage before production release.
+
 ### Backend
 
 From the repository root, install the pinned Python dependencies and start the API:
@@ -52,6 +60,12 @@ C:\Python313\python.exe -m unittest discover -s tests
 Pop-Location
 ```
 
+For the complete development/test environment, install:
+
+```powershell
+C:\Python313\python.exe -m pip install -r backend\requirements-dev.txt
+```
+
 ### Authentication
 
 The backend now exposes:
@@ -72,6 +86,8 @@ VITE_API_URL=http://127.0.0.1:8000
 
 Start the backend before opening the frontend. The first screen allows a user to register or sign in, restores an existing session, and provides sign out from the workspace profile.
 
+Saving onboarding setup updates the monthly plan and adds or updates matching bills and goals. It does not delete existing bills, goals, or savings contributions; use the dedicated Money center actions to remove records.
+
 ## Production deployment
 
 The repository includes:
@@ -80,6 +96,24 @@ The repository includes:
 - `Dockerfile` and `nginx.conf` for the Vite build served as a single-page application.
 - `docker-compose.prod.yml` for PostgreSQL, API, and frontend containers.
 - `.env.production.example` documenting required production variables.
+- `.github\workflows\ci.yml` for automated frontend and backend validation on pushes and pull requests.
+- `ops\backup.ps1` and `ops\restore.ps1` for PostgreSQL backup and restore drills.
+
+The frontend build and CI use Node.js 22, matching the supported engine for the current Vitest release.
+
+### Backup and restore drill
+
+Run these commands from the repository root on the Docker host:
+
+```powershell
+.\ops\backup.ps1 -EnvFile .env
+.\ops\restore.ps1 -EnvFile .env -BackupFile .\backups\finapp-YYYYMMDD-HHMMSS.sql
+```
+
+Use `-ComposeProject finapp-staging` when drilling against an isolated staging Compose project.
+For non-interactive automation, add `-ConfirmRestore` only after verifying the selected backup and target project.
+
+Store backups outside the application host, encrypt them at rest, restrict access, and perform a restore drill before accepting production financial data.
 
 To deploy on a Docker host:
 
