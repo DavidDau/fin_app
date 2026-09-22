@@ -29,7 +29,7 @@ This setup is suitable for a demo, portfolio, or short-lived hobby deployment on
 2. Connect the repository and select the branch containing `render.yaml`.
 3. Render discovers the API, static site, and Postgres definitions. Confirm that all three use the `free` plan.
 4. When Render requests values, supply `FRONTEND_ORIGIN` and `VITE_API_URL` from the preceding section. Render generates `JWT_SECRET_KEY`; never replace it with a value committed to Git.
-5. Create the Blueprint and wait for the API pre-deploy migration, API health check, and static-site build to complete.
+5. Create the Blueprint and wait for the API startup migration, API health check, and static-site build to complete. Free Render services do not support pre-deploy commands, so the API runs `alembic upgrade head` immediately before starting Uvicorn.
 
 ## Verify
 
