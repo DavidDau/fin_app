@@ -90,11 +90,18 @@ Saving onboarding setup updates the monthly plan and adds or updates matching bi
 
 ## Production deployment
 
+### Render free-tier deployment
+
+For a no-payment demo or hobby deployment on Render, use the repository's Blueprint configuration in `render.yaml`. It creates a free FastAPI web service, free React static site, and free Postgres database. Follow [RENDER.md](RENDER.md) for the required URLs and verification steps.
+
+**Do not use the free Render database for permanent financial records.** It expires after 30 days and does not include backups. The Docker/Caddy path below remains the appropriate path for a persistent, production-ready deployment.
+
 The repository includes:
 
 - `backend\Dockerfile` for the API and automatic Alembic migrations at container startup.
 - `Dockerfile` and `nginx.conf` for the Vite build served as a single-page application.
-- `docker-compose.prod.yml` for PostgreSQL, API, and frontend containers.
+- `docker-compose.prod.yml` for PostgreSQL, API, frontend, and Caddy HTTPS proxy containers.
+- `Caddyfile` which routes `/api/*` to the API and all other requests to the frontend on one HTTPS origin.
 - `.env.production.example` documenting required production variables.
 - `.github\workflows\ci.yml` for automated frontend and backend validation on pushes and pull requests.
 - `ops\backup.ps1` and `ops\restore.ps1` for PostgreSQL backup and restore drills.
@@ -117,11 +124,11 @@ Store backups outside the application host, encrypt them at rest, restrict acces
 
 To deploy on a Docker host:
 
-1. Copy `.env.production.example` to `.env` and replace every placeholder with a strong secret or your real HTTPS origins.
-2. Set `VITE_API_URL` to the public API origin without `/api/v1`; the frontend appends that path.
-3. Put a TLS reverse proxy or managed HTTPS load balancer in front of the frontend and API, then set `FRONTEND_ORIGIN` to the exact frontend origin.
-4. Run `docker compose --env-file .env -f docker-compose.prod.yml up -d --build`.
-5. Verify `/health` and `/api/v1/health`, then confirm `alembic upgrade head` completed in the API logs.
+1. Create a public DNS `A` record for the hostname chosen as `FINAPP_DOMAIN`, pointing to the Docker host. Open inbound TCP ports 80 and 443; do not expose PostgreSQL or the API port.
+2. Copy `.env.production.example` to `.env` and replace every placeholder with a strong secret. Use the same `https://` hostname for `FINAPP_DOMAIN`, `FRONTEND_ORIGIN` (with `https://`), and `VITE_API_URL` (with `https://`). `VITE_API_URL` must not include `/api/v1` because the frontend appends it.
+3. Run `docker compose --env-file .env -f docker-compose.prod.yml up -d --build`. Caddy requests and renews the TLS certificate once the DNS record resolves to this host.
+4. Verify `https://<FINAPP_DOMAIN>/health` and `https://<FINAPP_DOMAIN>/api/v1/health`, then confirm `alembic upgrade head` completed in the API logs.
+5. Register a test account, complete onboarding, add a transaction, refresh the browser, then sign out and sign back in to verify the complete persisted workflow.
 6. Configure encrypted PostgreSQL backups, log retention, alerting, and a restore drill before accepting production users.
 
 Do not commit `.env`, production passwords, or JWT secrets. The production settings reject the development JWT secret and non-production frontend origins when `APP_ENV=production`.

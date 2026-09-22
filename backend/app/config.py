@@ -18,6 +18,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
+        # Render supplies its Postgres connection string as postgresql://...
+        # while this application explicitly uses the psycopg 3 SQLAlchemy driver.
+        if self.database_url.startswith("postgres://"):
+            self.database_url = self.database_url.replace("postgres://", "postgresql+psycopg://", 1)
+        elif self.database_url.startswith("postgresql://"):
+            self.database_url = self.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
         if self.app_env.lower() == "production":
             if self.jwt_secret_key == "change-this-development-secret" or len(self.jwt_secret_key) < 32:
                 raise ValueError("JWT_SECRET_KEY must be a random value of at least 32 characters in production")
