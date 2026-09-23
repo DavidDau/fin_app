@@ -8,6 +8,7 @@ type Goal = { id?: string; name: string; target: number; monthly: number; curren
 type AuthMode = 'login' | 'register'
 type AuthUser = { id: string; email: string; display_name: string | null; is_active: boolean }
 type AuthTokens = { access_token: string; refresh_token: string; token_type: string }
+type UserFacingError = { title: string; message: string; guidance: string }
 type TransactionResponse = { id: string; transaction_date: string; transaction_type: 'INCOME' | 'EXPENSE'; amount: number; category: string; description: string; need_want: 'NEED' | 'WANT' | null }
 type MonthlySummary = { month_start: string; opening_balance: number; planned_income: number; actual_income: number; total_income: number; total_expenses: number; available_balance: number; allocations: { name: string; planned: number; spent: number }[] }
 type OnboardingData = {
@@ -20,6 +21,38 @@ type OnboardingData = {
 
 const apiBase = `${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/api/v1`
 let refreshRequest: Promise<boolean> | null = null
+
+const errorFromResponse = async (response: Response, fallback: string): Promise<Error> => {
+  let detail = ''
+  try {
+    const body = await response.json() as { detail?: string }
+    detail = body.detail || ''
+  } catch {
+    // A response body is optional, including for proxy and platform errors.
+  }
+  return new Error(detail || fallback)
+}
+
+const explainError = (error: unknown, action: string): UserFacingError => {
+  if (error instanceof TypeError) {
+    return {
+      title: 'We could not reach FinApp',
+      message: `Your ${action} was not sent, so nothing has changed.`,
+      guidance: 'Check your connection and try again. If this is the first visit to the free hosted app, wait up to a minute for the service to wake up.',
+    }
+  }
+  const message = error instanceof Error ? error.message : `We could not ${action}.`
+  if (/session|token|unauthorized|not authenticated/i.test(message)) {
+    return { title: 'Your session needs attention', message: 'Please sign in again before continuing.', guidance: 'Your financial data has not been changed.' }
+  }
+  return { title: `We could not ${action}`, message, guidance: 'Your information is still safe. Review the message and try again.' }
+}
+
+const readJson = async <T,>(input: RequestInfo | URL, init: RequestInit, fallback: string): Promise<T> => {
+  const response = await apiFetch(input, init)
+  if (!response.ok) throw await errorFromResponse(response, fallback)
+  return response.json() as Promise<T>
+}
 
 const refreshAccessToken = async (): Promise<boolean> => {
   const refreshToken = localStorage.getItem('finapp_refresh_token')
@@ -81,7 +114,7 @@ const monthStart = (value: string) => {
 function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
-  const [authError, setAuthError] = useState('')
+  const [authError, setAuthError] = useState<UserFacingError | null>(null)
   const [view, setView] = useState<View>('Dashboard')
   const [month, setMonth] = useState('September 2026')
   const [transactions, setTransactions] = useState<Transaction[]>([])
@@ -100,6 +133,10 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [onboarding, setOnboarding] = useState<OnboardingData | null>(null)
   const [setupLoading, setSetupLoading] = useState(false)
+  const [setupError, setSetupError] = useState<UserFacingError | null>(null)
+  const [workspaceLoading, setWorkspaceLoading] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState<UserFacingError | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const [summary, setSummary] = useState<MonthlySummary | null>(null)
   const [showBudgetForm, setShowBudgetForm] = useState(false)
   const [pageSlide, setPageSlide] = useState<'left' | 'right' | null>(null)
@@ -148,13 +185,14 @@ function App() {
       .catch(error => {
         localStorage.removeItem('finapp_access_token')
         localStorage.removeItem('finapp_refresh_token')
-        setAuthError(error instanceof Error ? error.message : 'Please sign in again.')
+        setAuthError(explainError(error, 'restore your session'))
       })
       .finally(() => setAuthLoading(false))
   }, [])
   useEffect(() => {
     if (authUser) {
       setSetupLoading(true)
+      setSetupError(null)
       const accessToken = localStorage.getItem('finapp_access_token')
       apiFetch(`${apiBase}/setup`, { headers: { Authorization: `Bearer ${accessToken}` } })
         .then(async response => {
@@ -174,39 +212,27 @@ function App() {
             setOnboarding(null)
           }
         })
-        .catch(error => setAuthError(error instanceof Error ? error.message : 'Unable to load your setup.'))
+        .catch(error => setSetupError(explainError(error, 'load your setup')))
         .finally(() => setSetupLoading(false))
     }
   }, [authUser])
   useEffect(() => {
-    if (!authUser) return
-    apiFetch(`${apiBase}/bills`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
-      .then(async response => {
-        if (!response.ok) throw new Error('Unable to load bills.')
-        return response.json() as Promise<Bill[]>
-      })
-      .then(items => setBills(items.map(item => ({ ...item, amount: Number(item.amount) }))))
-      .catch(() => setBills([]))
-  }, [authUser])
-  useEffect(() => {
-    if (!authUser) return
-    apiFetch(`${apiBase}/goals`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
-      .then(async response => {
-        if (!response.ok) throw new Error('Unable to load goals.')
-        return response.json() as Promise<Goal[]>
-      })
-      .then(items => setGoals(items.map(item => ({ ...item, target: Number(item.target), monthly: Number(item.monthly), current: Number(item.current) }))))
-      .catch(() => setGoals([]))
-  }, [authUser])
-  useEffect(() => {
-    if (!authUser) return
+    if (!authUser || !onboarding) return
+    let active = true
     const selectedMonth = monthStart(month)
-    apiFetch(`${apiBase}/transactions?month_start=${selectedMonth}`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
-      .then(async response => {
-        if (!response.ok) throw new Error('Unable to load transactions.')
-        return response.json() as Promise<TransactionResponse[]>
-      })
-      .then(items => setTransactions(items.map(item => ({
+    const headers = { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` }
+    setWorkspaceLoading(true)
+    setWorkspaceError(null)
+    Promise.all([
+      readJson<Bill[]>(`${apiBase}/bills`, { headers }, 'Unable to load bills.'),
+      readJson<Goal[]>(`${apiBase}/goals`, { headers }, 'Unable to load savings goals.'),
+      readJson<TransactionResponse[]>(`${apiBase}/transactions?month_start=${selectedMonth}`, { headers }, 'Unable to load transactions.'),
+      readJson<MonthlySummary>(`${apiBase}/reports/monthly-summary?month_start=${selectedMonth}`, { headers }, 'Unable to load this month’s summary.'),
+    ]).then(([loadedBills, loadedGoals, loadedTransactions, loadedSummary]) => {
+      if (!active) return
+      setBills(loadedBills.map(item => ({ ...item, amount: Number(item.amount) })))
+      setGoals(loadedGoals.map(item => ({ ...item, target: Number(item.target), monthly: Number(item.monthly), current: Number(item.current) })))
+      setTransactions(loadedTransactions.map(item => ({
         id: item.id,
         date: new Date(`${item.transaction_date}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
         transactionDate: item.transaction_date,
@@ -215,19 +241,15 @@ function App() {
         amount: Number(item.amount),
         type: item.transaction_type === 'INCOME' ? 'Income' : 'Expense',
         need: item.need_want === 'WANT' ? 'Want' : 'Need',
-      }))))
-      .catch(() => setTransactions([]))
-  }, [authUser, month])
-  useEffect(() => {
-    if (!authUser || !onboarding) return
-    apiFetch(`${apiBase}/reports/monthly-summary?month_start=${monthStart(month)}`, { headers: { Authorization: `Bearer ${localStorage.getItem('finapp_access_token')}` } })
-      .then(async response => {
-        if (!response.ok) throw new Error('Unable to load monthly summary.')
-        return response.json() as Promise<MonthlySummary>
-      })
-      .then(setSummary)
-      .catch(() => setSummary(null))
-  }, [authUser, onboarding, month])
+      })))
+      setSummary(loadedSummary)
+    }).catch(error => {
+      if (active) setWorkspaceError(explainError(error, 'load your workspace'))
+    }).finally(() => {
+      if (active) setWorkspaceLoading(false)
+    })
+    return () => { active = false }
+  }, [authUser, onboarding, month, reloadKey])
   const expenses = summary?.total_expenses ?? transactions.filter(t => t.type === 'Expense').reduce((s, t) => s + t.amount, 0)
   const income = summary?.total_income ?? transactions.filter(t => t.type === 'Income').reduce((s, t) => s + t.amount, 0) + (onboarding?.monthlyIncome || 0)
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2600) }
@@ -446,15 +468,16 @@ function App() {
     if (summaryResponse.ok) setSummary(await summaryResponse.json() as MonthlySummary)
   }
 
-  if (authLoading) return <div className="auth-shell"><div className="auth-loading">Loading FinApp…</div></div>
+  if (authLoading) return <LoadingState title="Checking your secure session" message="This usually takes only a moment." />
   if (!authUser) return <AuthScreen initialError={authError} onAuthenticated={(user, tokens) => {
     localStorage.setItem('finapp_access_token', tokens.access_token)
     localStorage.setItem('finapp_refresh_token', tokens.refresh_token)
     setSetupLoading(true)
     setAuthUser(user)
-    setAuthError('')
+    setAuthError(null)
   }} /> 
-  if (setupLoading) return <div className="auth-shell"><div className="auth-loading">Loading your setup…</div></div>
+  if (setupLoading) return <LoadingState title="Preparing your workspace" message="We are loading your plan, goals, and recent activity." />
+  if (setupError) return <WorkspaceErrorState error={setupError} onRetry={() => window.location.reload()} onSignOut={signOut} />
   if (!onboarding) return <OnboardingScreen user={authUser} onComplete={async data => {
     const response = await apiFetch(`${apiBase}/setup`, {
       method: 'PUT',
@@ -476,6 +499,8 @@ function App() {
     setGoals(saved.goals.map(item => ({ ...item, target: Number(item.target), monthly: Number(item.monthly), current: 0 })))
     setOnboarding(data)
   }} />
+  if (workspaceLoading) return <LoadingState title="Loading your money overview" message="Your information stays private while we refresh it." />
+  if (workspaceError) return <WorkspaceErrorState error={workspaceError} onRetry={() => setReloadKey(value => value + 1)} onSignOut={signOut} />
   return <div className={`${theme === 'dark' ? 'app dark' : 'app'} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
     <aside className="sidebar">
       <div className="brand"><button type="button" className="sidebar-toggle" aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setSidebarCollapsed(value => !value)}><span aria-hidden="true">☰</span></button><span className="brand-mark" aria-hidden="true"><span>F</span></span><span className="brand-name">Fin<b>App</b></span></div>
@@ -502,18 +527,30 @@ function App() {
   </div>
 }
 
-function AuthScreen({ initialError, onAuthenticated }: { initialError: string; onAuthenticated: (user: AuthUser, tokens: AuthTokens) => void }) {
+function FeedbackPanel({ error, onRetry }: { error: UserFacingError; onRetry?: () => void }) {
+  return <div className="feedback-panel" role="alert"><div className="feedback-icon" aria-hidden="true">!</div><div><strong>{error.title}</strong><p>{error.message}</p><small>{error.guidance}</small>{onRetry && <button type="button" className="feedback-retry" onClick={onRetry}>Try again</button>}</div></div>
+}
+
+function LoadingState({ title, message }: { title: string; message: string }) {
+  return <div className="auth-shell"><div className="state-card" role="status" aria-live="polite"><span className="loading-spinner" aria-hidden="true" /><h1>{title}</h1><p>{message}</p></div></div>
+}
+
+function WorkspaceErrorState({ error, onRetry, onSignOut }: { error: UserFacingError; onRetry: () => void; onSignOut: () => void }) {
+  return <div className="auth-shell"><div className="state-card"><span className="state-icon" aria-hidden="true">↻</span><h1>{error.title}</h1><p>{error.message}</p><p className="state-guidance">{error.guidance}</p><div className="state-actions"><button className="primary" onClick={onRetry}>Try again</button><button className="secondary" onClick={onSignOut}>Sign out</button></div></div></div>
+}
+
+function AuthScreen({ initialError, onAuthenticated }: { initialError: UserFacingError | null; onAuthenticated: (user: AuthUser, tokens: AuthTokens) => void }) {
   const [mode, setMode] = useState<AuthMode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [error, setError] = useState(initialError)
+  const [error, setError] = useState<UserFacingError | null>(initialError)
   const [submitting, setSubmitting] = useState(false)
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitting(true)
-    setError('')
+    setError(null)
     try {
       const endpoint = mode === 'login' ? 'login' : 'register'
       const body = mode === 'login' ? { email, password } : { email, password, display_name: displayName || null }
@@ -530,13 +567,13 @@ function AuthScreen({ initialError, onAuthenticated }: { initialError: string; o
       if (!userResponse.ok) throw new Error('Authentication succeeded, but the user profile could not be loaded.')
       onAuthenticated(await userResponse.json() as AuthUser, result)
     } catch (requestError) {
-      setError(requestError instanceof TypeError ? 'The FinApp API is unavailable. Start the backend and try again.' : requestError instanceof Error ? requestError.message : 'Unable to authenticate.')
+      setError(explainError(requestError, mode === 'login' ? 'sign you in' : 'create your account'))
     } finally {
       setSubmitting(false)
     }
   }
 
-  return <div className="auth-shell"><div className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><span>F</span></span><span className="brand-name">Fin<b>App</b></span></div><span className="eyebrow">{mode === 'login' ? 'Welcome back' : 'Get started'}</span><h1>{mode === 'login' ? 'Sign in to FinApp' : 'Create your FinApp account'}</h1><p>{mode === 'login' ? 'Continue planning and tracking your money.' : 'Set up your private personal finance workspace.'}</p>{error && <div className="auth-error" role="alert">{error}</div>}<form onSubmit={submit} className="auth-form">{mode === 'register' && <label>Name<input value={displayName} onChange={event => setDisplayName(event.target.value)} placeholder="Your name" maxLength={100} /></label>}<label>Email<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" required autoComplete="email" /></label><label>Password<input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="At least 8 characters" minLength={8} required autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></label><button className="primary full" disabled={submitting}>{submitting ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button></form><button className="auth-switch" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError('') }}>{mode === 'login' ? 'Need an account? Create one' : 'Already have an account? Sign in'}</button></div></div>
+  return <div className="auth-shell"><div className="auth-card"><div className="auth-brand"><span className="brand-mark" aria-hidden="true"><span>F</span></span><span className="brand-name">Fin<b>App</b></span></div><span className="eyebrow">{mode === 'login' ? 'Welcome back' : 'Get started'}</span><h1>{mode === 'login' ? 'Sign in to FinApp' : 'Create your FinApp account'}</h1><p>{mode === 'login' ? 'Continue planning and tracking your money.' : 'Set up your private personal finance workspace.'}</p>{error && <FeedbackPanel error={error} onRetry={() => setError(null)} />}<form onSubmit={submit} className="auth-form">{mode === 'register' && <label>Name<input value={displayName} onChange={event => setDisplayName(event.target.value)} placeholder="Your name" maxLength={100} /></label>}<label>Email<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" required autoComplete="email" /></label><label>Password<input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="At least 8 characters" minLength={8} required autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></label><button className="primary full" disabled={submitting}>{submitting ? 'Signing you in…' : mode === 'login' ? 'Sign in' : 'Create account'}</button></form><button className="auth-switch" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null) }}>{mode === 'login' ? 'Need an account? Create one' : 'Already have an account? Sign in'}</button></div></div>
 }
 
 function OnboardingScreen({ user, onComplete }: { user: AuthUser; onComplete: (data: OnboardingData) => Promise<void> }) {
@@ -647,7 +684,7 @@ function Dashboard({ month, expenses, income, openingBalance, allocations, trans
   </>
 }
 function Kpi({ label, value, change, tone, icon }: { label: string; value: string; change: string; tone: string; icon: string }) { return <div className="card kpi"><div className={`kpi-icon ${tone}`}>{icon}</div><small>{label}</small><strong>{value}</strong><span className={change.startsWith('-') ? 'negative' : 'positive'}>{change.startsWith('-') ? '↓' : '↑'} {change} <em>vs last month</em></span></div> }
-function TransactionList({ transactions, onEdit, onDelete }: { transactions: Transaction[]; onEdit?: (transaction: Transaction) => void; onDelete?: (transaction: Transaction) => void }) { return <div className="transaction-list">{transactions.map(t => <div className="transaction" key={t.id}><div className={`transaction-icon ${t.category.toLowerCase()}`}>{t.category === 'Food' ? '⌁' : t.category === 'Transport' ? '↗' : t.category === 'Income' ? '↙' : t.category === 'Bills' ? 'ϟ' : '♫'}</div><div className="transaction-desc"><strong>{t.description}</strong><small>{t.date} · {t.category}</small></div><b className={t.type === 'Income' ? 'income' : ''}>{t.type === 'Income' ? '+' : '-'}{money(t.amount).replace('RWF ', 'RWF ')}</b>{onEdit && <button className="transaction-action" onClick={() => onEdit(t)} aria-label={`Edit ${t.description}`}>Edit</button>}{onDelete && <button className="transaction-action delete" onClick={() => onDelete(t)} aria-label={`Delete ${t.description}`}>×</button>}</div>)}</div> }
+function TransactionList({ transactions, onEdit, onDelete }: { transactions: Transaction[]; onEdit?: (transaction: Transaction) => void; onDelete?: (transaction: Transaction) => void }) { return <div className="transaction-list">{transactions.length === 0 ? <div className="empty-state"><strong>No transactions for this month</strong><span>Add income or an expense to begin tracking your progress.</span></div> : transactions.map(t => <div className="transaction" key={t.id}><div className={`transaction-icon ${t.category.toLowerCase()}`}>{t.category === 'Food' ? '⌁' : t.category === 'Transport' ? '↗' : t.category === 'Income' ? '↙' : t.category === 'Bills' ? 'ϟ' : '♫'}</div><div className="transaction-desc"><strong>{t.description}</strong><small>{t.date} · {t.category}</small></div><b className={t.type === 'Income' ? 'income' : ''}>{t.type === 'Income' ? '+' : '-'}{money(t.amount).replace('RWF ', 'RWF ')}</b>{onEdit && <button className="transaction-action" onClick={() => onEdit(t)} aria-label={`Edit ${t.description}`}>Edit</button>}{onDelete && <button className="transaction-action delete" onClick={() => onDelete(t)} aria-label={`Delete ${t.description}`}>×</button>}</div>)}</div> }
 function GoalMini({ title, current, target, color, icon }: { title: string; current: number; target: number; color: string; icon: string }) { return <div className="goal-mini"><div className={`goal-icon ${color}`}>{icon}</div><div className="goal-info"><strong>{title}</strong><span>{money(current)} <small>of {money(target)}</small></span><div className="progress"><span className={color} style={{ width: `${current / target * 100}%` }} /></div></div><b>{Math.round(current / target * 100)}%</b></div> }
 
 function Budget({ allocations, onAdd }: { allocations: { name: string; planned: number; spent: number }[]; onAdd: () => void }) { const plannedTotal = allocations.reduce((total, item) => total + item.planned, 0); const spentTotal = allocations.reduce((total, item) => total + item.spent, 0); const usedTotal = plannedTotal ? spentTotal / plannedTotal * 100 : 0; const visualUsedTotal = Math.min(100, usedTotal); return <><PageHeading title="Monthly budget" description="Plan ahead and make every franc count." action={<button className="primary" onClick={onAdd}>＋ Edit allocations</button>} /><div className="card allocation-card"><div className="allocation-summary"><div><small>Total planned</small><strong>{money(plannedTotal)}</strong></div><div><small>Total spent</small><strong>{money(spentTotal)}</strong></div><div><small>Remaining</small><strong className="orange-text">{money(Math.max(0, plannedTotal - spentTotal))}</strong></div><div className="allocation-chart"><div className="donut small" style={{ '--used-percent': `${visualUsedTotal}%` } as React.CSSProperties}><span>{Math.round(usedTotal)}%<small>used</small></span></div></div></div><div className="table-wrap"><table><thead><tr><th>Category</th><th>Planned</th><th>Actual</th><th>Remaining</th><th>Used</th><th>Status</th></tr></thead><tbody>{allocations.map(item => { const used = item.planned ? item.spent / item.planned * 100 : 0; return <tr key={item.name}><td><span className="category-icon">•</span><b>{item.name}</b></td><td>{money(item.planned)}</td><td>{money(item.spent)}</td><td className="orange-text">{money(Math.max(0, item.planned - item.spent))}</td><td><div className="table-progress"><span style={{ width: `${Math.min(100, used)}%` }} /></div><small>{Math.round(used)}%</small></td><td><span className={`status ${used > 70 ? 'warning' : 'good'}`}>{used > 70 ? 'Watch' : 'On track'}</span></td></tr> })}</tbody></table></div></div></> }
